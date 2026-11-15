@@ -227,10 +227,7 @@ CMToploMonitorElement >> buildBody [
 CMToploMonitorElement >> buildHeader [
 
 	title := CMStyle label: (CMStyle heading: 'ClaudeMonitor').
-	hideReadsButton := ToButton new
-		                   labelText: 'Hide reads';
-		                   clickAction: [ self toggleHideReads ];
-		                   yourself.
+	hideReadsButton := self button: 'Hide reads' tooltip: 'Hide the calls that only look at things' action: [ self toggleHideReads ].
 	^ BlElement new
 		  layout: (BlLinearLayout horizontal
 				   alignCenterLeft;
@@ -252,22 +249,21 @@ CMToploMonitorElement >> buildHeader [
 							   c horizontal matchParent.
 							   c vertical exact: 1 ];
 					   yourself).
-				  (ToButton new
-					   labelText: 'A-';
-					   tooltipString: 'Smaller font';
-					   clickAction: [ self changeFontSizeBy: -1 ];
-					   yourself).
-				  (ToButton new
-					   labelText: 'A+';
-					   tooltipString: 'Larger font';
-					   clickAction: [ self changeFontSizeBy: 1 ];
-					   yourself).
+				  (self button: 'A-' tooltip: 'Smaller font' action: [ self changeFontSizeBy: -1 ]).
+				  (self button: 'A+' tooltip: 'Larger font' action: [ self changeFontSizeBy: 1 ]).
 				  hideReadsButton.
-				  (ToButton new
-					   labelText: 'Clear';
-					   tooltipString: 'Hide what happened until now';
-					   clickAction: [ self clear ];
-					   yourself) };
+				  (self button: 'Clear' tooltip: 'Hide what happened until now' action: [ self clear ]) };
+		  yourself
+]
+
+{ #category : 'initialization' }
+CMToploMonitorElement >> button: aString tooltip: aTooltip action: aBlock [
+	"A Toplo button with a label in our font size, not the theme's"
+
+	^ ToButton new
+		  label: (ToLabel text: (CMStyle button: aString));
+		  tooltipString: aTooltip;
+		  clickAction: aBlock;
 		  yourself
 ]
 
@@ -279,6 +275,7 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 	title text: (CMStyle heading: title text asString).
 	self applyArrowTokens.
 	self updateColumnTitles.
+	self updateButtons.
 	self reload.
 	selected ifNotNil: [ self showDetail: selected ]
 ]
@@ -708,10 +705,18 @@ CMToploMonitorElement >> titleTextOf: aColumn [
 CMToploMonitorElement >> toggleHideReads [
 
 	hideReads := hideReads not.
-	hideReadsButton labelText: (hideReads
-			 ifTrue: [ 'Show reads' ]
-			 ifFalse: [ 'Hide reads' ]).
+	hideReadsButton label text: (CMStyle button: (hideReads
+				  ifTrue: [ 'Show reads' ]
+				  ifFalse: [ 'Hide reads' ])).
 	self reload
+]
+
+{ #category : 'updating' }
+CMToploMonitorElement >> updateButtons [
+	"Give the header buttons the current font size"
+
+	(self allChildrenBreadthFirstSelect: [ :each | each isKindOf: ToButton ]) do: [ :button |
+		button label text: (CMStyle button: button label text asString) ]
 ]
 
 { #category : 'table' }
