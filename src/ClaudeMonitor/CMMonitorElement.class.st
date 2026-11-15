@@ -56,7 +56,7 @@ CMMonitorElement >> addText: aString code: isCode [
 			(self piecesOf: line) do: [ :piece |
 					count := count + 1.
 					count > self maxDetailLines ifTrue: [
-							self addLine: (CMStyle text: '[... cut]' size: 11 color: Color gray).
+							self addLine: (CMStyle small: '[... cut]').
 							^ self ].
 					self addLine: (isCode
 							 ifTrue: [ CMStyle code: piece ]
@@ -112,6 +112,13 @@ CMMonitorElement >> buildBody [
 ]
 
 { #category : 'initialization' }
+CMMonitorElement >> buildContent [
+
+	self addChild: self buildHeader.
+	self addChild: self buildBody
+]
+
+{ #category : 'initialization' }
 CMMonitorElement >> buildHeader [
 
 	header := CMStyle label: (CMStyle heading: 'ClaudeMonitor').
@@ -122,7 +129,7 @@ CMMonitorElement >> buildHeader [
 				   yourself);
 		  constraintsDo: [ :c |
 				  c horizontal matchParent.
-				  c vertical exact: 34 ];
+				  c vertical exact: CMStyle headerHeight ];
 		  padding: (BlInsets left: 10 right: 10);
 		  background: (Color r: 0.94 g: 0.94 b: 0.96);
 		  addChildren: {
@@ -132,7 +139,13 @@ CMMonitorElement >> buildHeader [
 							   c linear weight: 1.
 							   c vertical exact: 1 ];
 					   yourself).
-				  (self button: 'Hide reads' action: [ :button | self toggleHideReads: button ]).
+				  (self button: 'A-' action: [ :button | self changeFontSizeBy: -1 ]).
+				  (self button: 'A+' action: [ :button | self changeFontSizeBy: 1 ]).
+				  ((self button: 'Hide reads' action: [ :button | self toggleHideReads: button ])
+					   background: (hideReads
+							    ifTrue: [ CMStyle selectionColor ]
+							    ifFalse: [ Color white ]);
+					   yourself).
 				  (self button: 'Clear' action: [ :button | self clear ]) };
 		  yourself
 ]
@@ -154,10 +167,17 @@ CMMonitorElement >> button: aString action: aBlock [
 		          geometry: (BlRoundedRectangleGeometry cornerRadius: 4);
 		          border: (BlBorder paint: Color gray width: 1);
 		          background: Color white;
-		          addChild: (CMStyle label: (CMStyle text: aString size: 11 color: Color black));
+		          addChild: (CMStyle label: (CMStyle button: aString));
 		          yourself.
 	button addEventHandlerOn: BlClickEvent do: [ :event | aBlock value: button ].
 	^ button
+]
+
+{ #category : 'updating' }
+CMMonitorElement >> changeFontSizeBy: aNumber [
+
+	CMStyle fontSize: CMStyle fontSize + aNumber.
+	self rebuild
 ]
 
 { #category : 'updating' }
@@ -206,8 +226,7 @@ CMMonitorElement >> initialize [
 				c horizontal matchParent.
 				c vertical matchParent ];
 		background: Color white.
-	self addChild: self buildHeader.
-	self addChild: self buildBody
+	self buildContent
 ]
 
 { #category : 'filtering' }
@@ -243,8 +262,14 @@ CMMonitorElement >> maxDetailLines [
 
 { #category : 'detail' }
 CMMonitorElement >> maxLineWidth [
+	"Characters that fit in the detail pane at the current font size.
+	Before the first layout the pane has no width yet: take its share of mine"
 
-	^ 100
+	| width |
+	width := detail width > 0
+		         ifTrue: [ detail width ]
+		         ifFalse: [ self width * 0.45 ].
+	^ ((width max: 400) - 20 / CMStyle charWidth) floor max: 30
 ]
 
 { #category : 'accessing' }
@@ -272,6 +297,21 @@ CMMonitorElement >> printValue: anObject [
 	^ [ STONJSON toStringPretty: anObject ]
 		  on: Error
 		  do: [ anObject printString ]
+]
+
+{ #category : 'updating' }
+CMMonitorElement >> rebuild [
+	"Build everything again, e.g. after a font size change"
+
+	| previous |
+	previous := selected.
+	self removeChildren.
+	rowsById removeAll.
+	selected := nil.
+	self buildContent.
+	log ifNotNil: [ log activities do: [ :each | self addRowFor: each ] ].
+	previous ifNotNil: [ self select: previous ].
+	self updateHeader
 ]
 
 { #category : 'accessing' }
@@ -322,7 +362,7 @@ CMMonitorElement >> showDetail: anActivity [
 	self addLine: (CMStyle heading: (String streamContents: [ :s |
 					  s << anActivity shortToolName << '  -  ' << anActivity status asString.
 					  anActivity durationMilliseconds ifNotNil: [ :ms | s << '  -  ' << ms rounded printString << ' ms' ] ])).
-	self addLine: (CMStyle text: (self contextLineOf: anActivity) size: 11 color: Color gray).
+	self addLine: (CMStyle small: (self contextLineOf: anActivity)).
 	anActivity why ifNotNil: [ :why |
 			self
 				section: 'Why';

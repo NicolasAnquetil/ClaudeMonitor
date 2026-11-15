@@ -40,7 +40,7 @@ CMActivityRowElement >> buildRow [
 				 yourself);
 		constraintsDo: [ :c |
 				c horizontal matchParent.
-				c vertical exact: 24 ];
+				c vertical exact: CMStyle rowHeight ];
 		padding: (BlInsets
 				 top: 2
 				 left: 8
@@ -48,7 +48,7 @@ CMActivityRowElement >> buildRow [
 				 right: 8);
 		clipChildren: true.
 	statusDot := BlElement new
-		             extent: 10 @ 10;
+		             extent: CMStyle dotSize asPoint;
 		             geometry: BlCircleGeometry new;
 		             yourself.
 	time := CMStyle label: (CMStyle code: (activity startedAt ifNil: [ '' ] ifNotNil: [ :t | t asTime print24 ])).
@@ -64,7 +64,7 @@ CMActivityRowElement >> buildRow [
 				          right: 6);
 		         geometry: (BlRoundedRectangleGeometry cornerRadius: 4);
 		         background: (CMStyle colorForActivity: activity);
-		         addChild: (CMStyle label: (CMStyle text: activity shortToolName size: 11 color: Color white));
+		         addChild: (CMStyle label: (CMStyle badge: activity shortToolName));
 		         yourself.
 	summary := (CMStyle label: (CMStyle text: activity summary))
 		           constraintsDo: [ :c | c linear weight: 1 ];
