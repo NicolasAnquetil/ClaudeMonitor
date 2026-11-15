@@ -206,6 +206,24 @@ CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
 		in: aText
 ]
 
+{ #category : 'tokens' }
+CMToploMonitorElement >> addTokensDetailOf: anItem to: aText [
+
+	| summary |
+	summary := (self isSession: anItem)
+		           ifTrue: [ (self callsOfSession: anItem) ifEmpty: [ nil ] ifNotEmpty: [ :calls | self summaryOfCalls: calls ] ]
+		           ifFalse: [
+				           anItem isStep
+					           ifTrue: [ nil ]
+					           ifFalse: [ self tokensDetailOf: anItem ] ].
+	summary ifNil: [ ^ self ].
+	self
+		section: 'Tokens'
+		text: summary
+		code: false
+		in: aText
+]
+
 { #category : 'table' }
 CMToploMonitorElement >> applyArrowTokens [
 	"Solid triangles to fold and unfold, sized with the font, instead of the theme's small chevrons"
@@ -294,6 +312,15 @@ CMToploMonitorElement >> button: aString tooltip: aTooltip action: aBlock [
 		  tooltipString: aTooltip;
 		  clickAction: aBlock;
 		  yourself
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> callsOfSession: aSession [
+
+	| calls |
+	calls := IdentitySet new.
+	log activities do: [ :each | (each sessionId = aSession id and: [ each call notNil ]) ifTrue: [ calls add: each call ] ].
+	^ calls
 ]
 
 { #category : 'updating' }
@@ -412,7 +439,7 @@ CMToploMonitorElement >> fitColumns [
 	| first width |
 	table header cellContainers ifEmpty: [ ^ self ].
 	first := table header cellContainers first.
-	width := (table width - self timeColumnWidth - self durationColumnWidth - self arrowBreadth - 30) rounded max: 150.
+	width := (table width - self timeColumnWidth - self durationColumnWidth - self tokensColumnWidth - self arrowBreadth - 30) rounded max: 150.
 	(first width - width) abs < 4 ifTrue: [ ^ self ].
 	first updateWidthWith: width.
 	self inUIThread: [ self reload ]
@@ -560,7 +587,7 @@ CMToploMonitorElement >> newLineIn: aText [
 	aText append: (CMStyle text: String cr)
 ]
 
-{ #category : 'table' }
+{ #category : 'initialization' }
 CMToploMonitorElement >> newTable [
 	"Selection and folding events are dispatched by the inner list, not by the table"
 
@@ -593,6 +620,14 @@ CMToploMonitorElement >> newTable [
 				 dataIndex: [ :item | item ];
 			headerCellBuilder: [ :cell :column | self titleCellIn: cell for: column ];
 				 cellBuilder: [ :cell :item | cell addChild: (self durationCellFor: item) ];
+				 yourself).
+			(ToTableColumn new
+				 title: 'Tokens';
+				 key: #tokens;
+				 width: self tokensColumnWidth;
+				 dataIndex: [ :item | item ];
+			headerCellBuilder: [ :cell :column | self titleCellIn: cell for: column ];
+				 cellBuilder: [ :cell :item | cell addChild: (self tokensCellFor: item) ];
 				 yourself) }.
 	newTable list
 		addEventHandlerOn: ToListPrimarySelectionChangedEvent do: [ :event | self selectionChanged: event ];
@@ -694,12 +729,14 @@ CMToploMonitorElement >> selectedIndex [
 	^ self indexOf: selected
 ]
 
-{ #category : 'selection' }
+{ #category : 'events' }
 CMToploMonitorElement >> selectionChanged: anEvent [
+	"The list may have been rebuilt since the event was sent: ignore a selection beyond it"
 
 	| indexes |
 	indexes := anEvent selectedIndexes.
 	indexes ifEmpty: [ ^ self ].
+	indexes first > table dataAccessor size ifTrue: [ ^ self ].
 	selected := table dataAccessor unwrappedDataItemAt: indexes first.
 	self showDetail: selected
 ]
@@ -720,6 +757,14 @@ CMToploMonitorElement >> sessions [
 		  (a startedAt ifNil: [ DateAndTime epoch ]) >= (b startedAt ifNil: [ DateAndTime epoch ]) ]
 ]
 
+{ #category : 'tokens' }
+CMToploMonitorElement >> shortCount: aNumber [
+
+	aNumber < 1000 ifTrue: [ ^ aNumber rounded printString ].
+	aNumber < 1000000 ifTrue: [ ^ (aNumber / 1000 printShowingDecimalPlaces: 1) , 'k' ].
+	^ (aNumber / 1000000 printShowingDecimalPlaces: 1) , 'M'
+]
+
 { #category : 'detail' }
 CMToploMonitorElement >> showDetail: anItem [
 
@@ -731,6 +776,7 @@ CMToploMonitorElement >> showDetail: anItem [
 				(anItem isThought or: [ anItem isStep ])
 					ifTrue: [ self addTextDetailOf: anItem to: text ]
 					ifFalse: [ self addActivityDetailOf: anItem to: text ] ].
+	self addTokensDetailOf: anItem to: text.
 	detail text: text
 ]
 
@@ -775,6 +821,27 @@ CMToploMonitorElement >> statusIconFor: anActivity [
 	^ icon
 ]
 
+{ #category : 'tokens' }
+CMToploMonitorElement >> summaryOfCalls: aCollection [
+	"Totals of model calls, each counted once"
+
+	| sum |
+	sum := [ :selector | aCollection inject: 0 into: [ :total :each | total + (each perform: selector) ] ].
+	^ String streamContents: [ :s |
+			  (s << aCollection size printString << ' model call' << (aCollection size = 1
+					    ifTrue: [ '' ]
+					    ifFalse: [ 's' ]))
+				  << ', counted once each.';
+				  cr.
+			  (s << 'Written: ' << (sum value: #outputTokens) asStringWithCommas << ' output tokens, '
+			   << (sum value: #thinkingTokens) asStringWithCommas)
+				  << ' of them thinking.';
+				  cr.
+			  s << 'Read: ' << (sum value: #inputTokens) asStringWithCommas << ' input tokens: '
+			  << (sum value: #newInputTokens) asStringWithCommas << ' new, ' << (sum value: #cacheWriteTokens) asStringWithCommas
+			  << ' cache writes, ' << (sum value: #cacheReadTokens) asStringWithCommas << ' cache reads.' ]
+]
+
 { #category : 'accessing' }
 CMToploMonitorElement >> table [
 
@@ -811,6 +878,76 @@ CMToploMonitorElement >> toggleHideReads [
 				  ifTrue: [ 'Show reads' ]
 				  ifFalse: [ 'Hide reads' ])).
 	self reload
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensCellFor: anItem [
+	"Right-aligned, so that counts line up"
+
+	^ BlElement new
+		  layout: (BlLinearLayout horizontal
+				   alignCenterRight;
+				   yourself);
+		  constraintsDo: [ :c |
+				  c horizontal matchParent.
+				  c vertical fitContent ];
+		  padding: (BlInsets right: 8);
+		  addChild: (CMStyle label: (CMStyle code: (self tokensStringOf: anItem)));
+		  yourself
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensColumnWidth [
+	"Room for ~999.9k"
+
+	^ (CMStyle charWidth * 8) rounded + 8
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensDetailOf: anActivity [
+	"The tokens of the row, and of the model call it comes from"
+
+	| call own |
+	anActivity isPrompt ifTrue: [ ^ anActivity callsBelow ifEmpty: [ nil ] ifNotEmpty: [ :calls | self summaryOfCalls: calls ] ].
+	call := anActivity call.
+	own := anActivity ownTokens.
+	^ String streamContents: [ :s |
+			  own ifNil: [ s << 'No model call known for this row.' ] ifNotNil: [
+					  s << 'This row: ' << ((anActivity call isEstimateFor: anActivity)
+						   ifTrue: [ 'about ' ]
+						   ifFalse: [ '' ]) << own asStringWithCommas << ' output tokens'.
+					  (anActivity call isEstimateFor: anActivity) ifTrue: [
+						  s << ' (estimated: the call''s output is shared among its blocks by size)' ].
+					  s << '.' ].
+			  (anActivity isMessage and: [ anActivity hasChildren ]) ifTrue: [
+					  anActivity outputTokens ifNotNil: [ :n |
+							  s cr. s << 'With its tool calls: ' << (anActivity isTokenEstimate
+								   ifTrue: [ 'about ' ]
+								   ifFalse: [ '' ]) << n asStringWithCommas << ' output tokens.' ] ].
+			  call ifNotNil: [
+					  s cr. s << 'Its model call: ' << call outputTokens asStringWithCommas << ' output tokens ('
+					  << call thinkingTokens asStringWithCommas << ' thinking); read ' << call inputTokens asStringWithCommas
+					  << ' input tokens (' << call newInputTokens asStringWithCommas << ' new, ' << call cacheWriteTokens asStringWithCommas
+					  << ' cache writes, ' << call cacheReadTokens asStringWithCommas << ' cache reads); '
+					  << call shownActivities size printString << ' row' << (call shownActivities size = 1
+						   ifTrue: [ ' shows' ]
+						   ifFalse: [ 's show' ]) << ' it.' ] ]
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensStringOf: anItem [
+
+	| tokens |
+	tokens := (self isSession: anItem)
+		          ifTrue: [
+				          (self callsOfSession: anItem)
+					          ifEmpty: [ nil ]
+					          ifNotEmpty: [ :calls | calls inject: 0 into: [ :sum :each | sum + each outputTokens ] ] ]
+		          ifFalse: [ anItem outputTokens ].
+	tokens ifNil: [ ^ '' ].
+	^ (((self isSession: anItem) not and: [ anItem isTokenEstimate ])
+		   ifTrue: [ '~' ]
+		   ifFalse: [ '' ]) , (self shortCount: tokens)
 ]
 
 { #category : 'updating' }

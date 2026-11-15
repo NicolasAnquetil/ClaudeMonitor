@@ -27,7 +27,8 @@ Class {
 		'reportedDuration',
 		'promptId',
 		'parent',
-		'children'
+		'children',
+		'call'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -46,6 +47,29 @@ CMActivity >> ancestorsDo: aBlock [
 	parent ifNotNil: [
 			aBlock value: parent.
 			parent ancestorsDo: aBlock ]
+]
+
+{ #category : 'tokens' }
+CMActivity >> call [
+	"The model call that wrote me (a CMModelCall), when the transcript told it"
+
+	^ call
+]
+
+{ #category : 'tokens' }
+CMActivity >> call: aModelCall [
+
+	call := aModelCall
+]
+
+{ #category : 'tokens' }
+CMActivity >> callsBelow [
+	"The model calls of me and everything under me, each once"
+
+	| calls |
+	calls := IdentitySet new.
+	self withAllChildrenDo: [ :each | each call ifNotNil: [ :c | calls add: c ] ].
+	^ calls
 ]
 
 { #category : 'hierarchy' }
@@ -132,6 +156,13 @@ CMActivity >> input: aDictionary [
 	input := aDictionary
 ]
 
+{ #category : 'tokens' }
+CMActivity >> inputTokens [
+	"For a prompt: the context all its calls read"
+
+	^ self callsBelow inject: 0 into: [ :sum :each | sum + each inputTokens ]
+]
+
 { #category : 'testing' }
 CMActivity >> isFailed [
 
@@ -184,6 +215,14 @@ CMActivity >> isThought [
 	^ self isMessage or: [ self isThinking ]
 ]
 
+{ #category : 'tokens' }
+CMActivity >> isTokenEstimate [
+
+	self isPrompt ifTrue: [ ^ false ].
+	(call notNil and: [ call isEstimateFor: self ]) ifTrue: [ ^ true ].
+	^ self isMessage and: [ self children anySatisfy: [ :each | each isTokenEstimate ] ]
+]
+
 { #category : 'testing' }
 CMActivity >> isTool [
 
@@ -228,6 +267,27 @@ CMActivity >> moveTo: anActivity [
 	parent ifNotNil: [ :old | old children removeAllSuchThat: [ :each | each == self ] ].
 	parent := nil.
 	self parent: anActivity
+]
+
+{ #category : 'tokens' }
+CMActivity >> outputTokens [
+	"The tokens Claude wrote for me: a prompt counts all its calls, a message counts its tool calls too"
+
+	| tokens |
+	self isPrompt ifTrue: [
+			self callsBelow ifEmpty: [ ^ nil ].
+			^ self callsBelow inject: 0 into: [ :sum :each | sum + each outputTokens ] ].
+	self isMessage ifFalse: [ ^ self ownTokens ].
+	tokens := self ownTokens.
+	self children do: [ :each | each outputTokens ifNotNil: [ :n | tokens := (tokens ifNil: [ 0 ]) + n ] ].
+	^ tokens
+]
+
+{ #category : 'tokens' }
+CMActivity >> ownTokens [
+	"The output tokens of what I show myself"
+
+	^ call ifNotNil: [ :c | c tokensOf: self ]
 ]
 
 { #category : 'hierarchy' }
@@ -380,6 +440,13 @@ CMActivity >> text [
 	^ (self input at: 'text' ifAbsent: [ '' ]) asString
 ]
 
+{ #category : 'tokens' }
+CMActivity >> thinkingTokens [
+	"For a prompt: the thinking tokens of all its calls"
+
+	^ self callsBelow inject: 0 into: [ :sum :each | sum + each thinkingTokens ]
+]
+
 { #category : 'accessing' }
 CMActivity >> toolName [
 
@@ -402,4 +469,11 @@ CMActivity >> why [
 CMActivity >> why: aString [
 
 	why := aString
+]
+
+{ #category : 'tokens' }
+CMActivity >> withAllChildrenDo: aBlock [
+
+	aBlock value: self.
+	self children do: [ :each | each withAllChildrenDo: aBlock ]
 ]

@@ -30,7 +30,15 @@ The window shows a tree, newest on top: each Claude Code session, the prompts yo
 - the tool calls, each under the message Claude wrote just before it (or under the prompt when there is none),
 - for a to-do list (`TodoWrite`) or a plan (`ExitPlanMode`), one row per step under the call, with its state (done, in progress, pending).
 
-Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
+Each row has a status icon (running, ok, failed), the tool, a summary, then the start time, the duration and the tokens in their own columns.
+
+The tokens are the output tokens Claude wrote, read from the transcript, which gives them per model call:
+
+- a thinking row has the exact thinking tokens of its call;
+- a message or a tool call gets the rest of its call's output, shared by size when the call made several of them (shown with `~`, an estimate); thinking whose text was not kept counts for the call's first other row;
+- a message row also counts its tool calls, and a prompt or a session row counts each of its calls once.
+
+The details pane gives the tokens of the selected row and of its model call, including the input tokens it read (new, cache writes, cache reads). Calls made by subagents are not counted. The arrows fold and unfold sessions and prompts.
 
 Keys: up and down move in the list; left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call.
 

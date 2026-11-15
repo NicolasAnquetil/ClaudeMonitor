@@ -21,7 +21,9 @@ Class {
 		'fileSystem',
 		'transcriptPositions',
 		'transcriptPrompts',
-		'transcriptLock'
+		'transcriptLock',
+		'calls',
+		'callsByKey'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -73,6 +75,36 @@ CMActivityLog >> addStepsOf: aToolActivity [
 CMActivityLog >> announcer [
 
 	^ announcer
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> callOf: anEntry [
+	"The model call anEntry is part of, with the usage it gives (the latest replaces the earlier)"
+
+	| message messageId call |
+	message := anEntry at: 'message' ifAbsent: [ ^ nil ].
+	message isDictionary ifFalse: [ ^ nil ].
+	messageId := message at: 'id' ifAbsent: [ ^ nil ].
+	call := self calls at: messageId ifAbsentPut: [
+			        CMModelCall new
+				        id: messageId;
+				        yourself ].
+	call usage: (message at: 'usage' ifAbsent: [ nil ]).
+	^ call
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> calls [
+	"The model calls read in the transcripts, by message id"
+
+	^ calls ifNil: [ calls := Dictionary new ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> callsByKey [
+	"The model call of each block, by block key: an activity id for a message or a thinking, a tool use id for a tool call"
+
+	^ callsByKey ifNil: [ callsByKey := Dictionary new ]
 ]
 
 { #category : 'private' }
@@ -154,6 +186,14 @@ CMActivityLog >> lastPromptBySession [
 	^ lastPromptBySession ifNil: [ lastPromptBySession := Dictionary new ]
 ]
 
+{ #category : 'transcript' }
+CMActivityLog >> link: aKey of: aCall [
+	"Tie the block aKey to its activity, if it exists already; otherwise its activity will be tied when created"
+
+	self callsByKey at: aKey put: aCall.
+	(self activityWithId: aKey) ifNotNil: [ :activity | aCall show: aKey by: activity ]
+]
+
 { #category : 'accessing' }
 CMActivityLog >> maxRawEvents [
 
@@ -189,27 +229,45 @@ CMActivityLog >> noteSessionOf: aDictionary [
 
 { #category : 'transcript' }
 CMActivityLog >> noteTranscriptEntry: anEntry inSession: aSessionId [
+	"A user entry tells the prompt; an assistant entry is one block of a model call: a message, a thinking
+	(both shown when they have text) or a tool use"
 
+	| call |
 	(anEntry at: 'isSidechain' ifAbsent: [ false ]) == true ifTrue: [ ^ self ].
 	(anEntry at: 'type' ifAbsent: [ nil ]) = 'user' ifTrue: [ ^ self transcriptPrompts at: aSessionId put: (anEntry at: 'promptId') ].
+	call := self callOf: anEntry.
 	(transcriptReader contentOf: anEntry) withIndexDo: [ :block :index |
-			| type text |
+			| type text key |
 			type := block at: 'type' ifAbsent: [ nil ].
-			text := type = 'text'
-				        ifTrue: [ block at: 'text' ifAbsent: [ nil ] ]
-				        ifFalse: [
-						        type = 'thinking'
-							        ifTrue: [ block at: 'thinking' ifAbsent: [ nil ] ]
-							        ifFalse: [ nil ] ].
-			(text isString and: [ text trimBoth notEmpty ]) ifTrue: [
-					self
-						thought: text
-						kind: (type = 'text'
-								 ifTrue: [ #message ]
-								 ifFalse: [ #thinking ])
-						id: (anEntry at: 'uuid' ifAbsent: [ UUID new asString ]) , '#' , index printString
-						at: (anEntry at: 'timestamp' ifAbsent: [ nil ])
-						inSession: aSessionId ] ]
+			type = 'tool_use'
+				ifTrue: [
+						key := block at: 'id' ifAbsent: [ nil ].
+						(call notNil and: [ key notNil ]) ifTrue: [
+								call addBlock: #tool key: key size: (self sizeOfToolInput: (block at: 'input' ifAbsent: [ nil ])).
+								self link: key of: call ] ]
+				ifFalse: [
+						(type = 'text' or: [ type = 'thinking' ]) ifTrue: [
+								text := block at: type ifAbsent: [ nil ].
+								text isString ifFalse: [ text := '' ].
+								key := (anEntry at: 'uuid' ifAbsent: [ UUID new asString ]) , '#' , index printString.
+								text trimBoth ifNotEmpty: [
+										self
+											thought: text
+											kind: (type = 'text'
+													 ifTrue: [ #message ]
+													 ifFalse: [ #thinking ])
+											id: key
+											at: (anEntry at: 'timestamp' ifAbsent: [ nil ])
+											inSession: aSessionId ].
+								call ifNotNil: [
+										call
+											addBlock: (type = 'text'
+													 ifTrue: [ #message ]
+													 ifFalse: [ #thinking ])
+											key: key
+											size: text size.
+										self link: key of: call ] ] ] ].
+	call ifNotNil: [ self tokensChangedIn: call ]
 ]
 
 { #category : 'hierarchy' }
@@ -393,6 +451,14 @@ CMActivityLog >> size [
 	^ mutex critical: [ activities size ]
 ]
 
+{ #category : 'transcript' }
+CMActivityLog >> sizeOfToolInput: anInput [
+
+	^ [ (STONJSON toString: anInput) size ]
+		  on: Error
+		  do: [ anInput printString size ]
+]
+
 { #category : 'sessions' }
 CMActivityLog >> startTimeOf: aSession [
 
@@ -433,6 +499,21 @@ CMActivityLog >> thought: aString kind: aKind id: anId at: aTimestamp inSession:
 CMActivityLog >> titleCheckPeriod [
 
 	^ 20 seconds
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> tokensChangedIn: aCall [
+	"The rows of aCall and the rows above them show other token counts"
+
+	| changed |
+	changed := IdentitySet new.
+	aCall shownActivities do: [ :each |
+			changed add: each.
+			each ancestorsDo: [ :ancestor | changed add: ancestor ] ].
+	changed do: [ :each |
+			announcer announce: (CMActivityChanged new
+					 activity: each;
+					 yourself) ]
 ]
 
 { #category : 'hook events' }
@@ -477,6 +558,9 @@ CMActivityLog >> toolStarted: aDictionary [
 					            activities add: created.
 					            byId at: id put: created.
 					            created ] ].
+	isNew ifTrue: [
+		self transcriptLock critical: [
+			(self callsByKey at: id ifAbsent: [ nil ]) ifNotNil: [ :c | c show: id by: activity ] ] ].
 	activity
 		sessionId: (aDictionary at: 'session_id' ifAbsent: [ nil ]);
 		toolName: (aDictionary at: 'tool_name' ifAbsent: [ '?' ]);

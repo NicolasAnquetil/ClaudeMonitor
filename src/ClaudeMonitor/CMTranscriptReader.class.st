@@ -37,11 +37,10 @@ CMTranscriptReader >> entry: anEntry hasToolUse: aToolUseId [
 { #category : 'following' }
 CMTranscriptReader >> entryOf: aLine [
 	"Only what matters, without parsing everything: a user entry gives the prompt it belongs to
-	(its result can be big), an assistant entry with text or thinking is parsed"
+	(its result can be big), an assistant entry (a block of a model call, with its usage) is parsed"
 
 	| start stop |
 	(aLine includesSubstring: '"type":"assistant"') ifTrue: [
-			((aLine includesSubstring: '"type":"text"') or: [ aLine includesSubstring: '"type":"thinking"' ]) ifFalse: [ ^ nil ].
 			^ [
 				  (STONJSON fromString: aLine) ifNotNil: [ :entry |
 						  entry isDictionary

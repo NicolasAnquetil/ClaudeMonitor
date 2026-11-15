@@ -38,6 +38,16 @@ CMTranscriptFollowingTest >> assistantLine: anUuid type: aType text: aString [
 ]
 
 { #category : 'helpers' }
+CMTranscriptFollowingTest >> callLine: anUuid call: aMessageId block: aBlockJson output: anOutput thinking: aThinking [
+	"An assistant entry of the model call aMessageId, with its usage"
+
+	^ '{"type":"assistant","uuid":"' , anUuid , '","timestamp":"2026-11-15T12:00:00.000Z","message":{"id":"' , aMessageId
+	  , '","content":[' , aBlockJson
+	  , '],"usage":{"input_tokens":2,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":'
+	  , anOutput printString , ',"output_tokens_details":{"thinking_tokens":' , aThinking printString , '}}}}'
+]
+
+{ #category : 'helpers' }
 CMTranscriptFollowingTest >> event: aName [
 
 	^ Dictionary new
@@ -104,6 +114,24 @@ CMTranscriptFollowingTest >> testAMessageReadLateTakesTheToolCallsAfterIt [
 	self assert: message children asArray equals: { late }
 ]
 
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testASingleBlockCallIsExact [
+
+	| message |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	self append: { (self
+			 callLine: 'a1'
+			 call: 'm1'
+			 block: (self textBlock: 'Done.')
+			 output: 50
+			 thinking: 0) }.
+	log handleHookEvent: (self event: 'Stop').
+	message := log activityWithId: 'a1#1'.
+	self assert: message outputTokens equals: 50.
+	self deny: message isTokenEstimate
+]
+
 { #category : 'tests' }
 CMTranscriptFollowingTest >> testATodoListHasOneStepPerTodo [
 
@@ -146,6 +174,54 @@ CMTranscriptFollowingTest >> testEntriesOfPromptsNotMonitoredAreSkipped [
 	self assert: (log activities noneSatisfy: [ :each | each isMessage ])
 ]
 
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testHiddenThinkingCountsForTheOtherBlock [
+
+	| tool |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	self append: {
+			(self
+				 callLine: 'a1'
+				 call: 'm1'
+				 block: (self thinkingBlock: '')
+				 output: 120
+				 thinking: 80).
+			(self
+				 callLine: 'a2'
+				 call: 'm1'
+				 block: (self toolBlock: 't1')
+				 output: 120
+				 thinking: 80) }.
+	tool := log handleHookEvent: (self pre: 't1').
+	self assert: tool outputTokens equals: 120.
+	self deny: tool isTokenEstimate
+]
+
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testLaterUsageOfACallReplacesTheEarlierOne [
+
+	| message |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	self append: { (self
+			 callLine: 'a1'
+			 call: 'm1'
+			 block: (self textBlock: 'Hi')
+			 output: 10
+			 thinking: 0) }.
+	log handleHookEvent: (self event: 'Stop').
+	self append: { (self
+			 callLine: 'a2'
+			 call: 'm1'
+			 block: (self toolBlock: 't1')
+			 output: 90
+			 thinking: 0) }.
+	log handleHookEvent: (self pre: 't1').
+	message := log activityWithId: 'a1#1'.
+	self assert: message call outputTokens equals: 90
+]
+
 { #category : 'tests' }
 CMTranscriptFollowingTest >> testMessagesAndThinkingComeBeforeTheToolCallUnderTheirPrompt [
 
@@ -161,6 +237,39 @@ CMTranscriptFollowingTest >> testMessagesAndThinkingComeBeforeTheToolCallUnderTh
 	self assert: prompt children second text equals: 'First I look.'.
 	self assert: prompt children second summary equals: 'First I look.'.
 	self assert: prompt children second children asArray equals: { tool }
+]
+
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testPromptTotalsCountEachCallOnce [
+
+	| prompt |
+	self append: { (self userLine: 'p1') }.
+	prompt := log handleHookEvent: (self prompt: 'p1').
+	self append: {
+			(self
+				 callLine: 'a1'
+				 call: 'm1'
+				 block: (self textBlock: 'First')
+				 output: 300
+				 thinking: 100).
+			(self
+				 callLine: 'a2'
+				 call: 'm1'
+				 block: (self toolBlock: 't1')
+				 output: 300
+				 thinking: 100) }.
+	log handleHookEvent: (self pre: 't1').
+	self append: { (self
+			 callLine: 'a3'
+			 call: 'm2'
+			 block: (self textBlock: 'Then')
+			 output: 40
+			 thinking: 0) }.
+	log handleHookEvent: (self event: 'Stop').
+	self assert: prompt outputTokens equals: 340.
+	self assert: prompt thinkingTokens equals: 100.
+	self assert: prompt inputTokens equals: 2 * (2 + 100 + 1000).
+	self deny: prompt isTokenEstimate
 ]
 
 { #category : 'tests' }
@@ -195,6 +304,61 @@ CMTranscriptFollowingTest >> testTheTranscriptIsReadOnce [
 	self assert: (prompt children collect: [ :each | each text ]) asArray equals: #( 'One.' 'Two.' )
 ]
 
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testThinkingHasItsExactTokensAndTheRestIsShared [
+
+	| thinking message tool |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	self append: {
+			(self
+				 callLine: 'a1'
+				 call: 'm1'
+				 block: (self thinkingBlock: 'Let me see')
+				 output: 300
+				 thinking: 100).
+			(self
+				 callLine: 'a2'
+				 call: 'm1'
+				 block: (self textBlock: 'Hello')
+				 output: 300
+				 thinking: 100).
+			(self
+				 callLine: 'a3'
+				 call: 'm1'
+				 block: (self toolBlock: 't1')
+				 output: 300
+				 thinking: 100) }.
+	tool := log handleHookEvent: (self pre: 't1').
+	thinking := log activityWithId: 'a1#1'.
+	message := log activityWithId: 'a2#1'.
+	self assert: thinking outputTokens equals: 100.
+	self deny: thinking isTokenEstimate.
+	self assert: tool isTokenEstimate.
+	self assert: tool ownTokens > message ownTokens.
+	self assert: (message ownTokens + tool ownTokens - 200) abs <= 1.
+	"The message row shows its tool calls with it"
+	self assert: message outputTokens equals: message ownTokens + tool ownTokens
+]
+
+{ #category : 'tests - tokens' }
+CMTranscriptFollowingTest >> testToolCallReadAfterItsHookGetsItsTokens [
+
+	| tool |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	tool := log handleHookEvent: (self pre: 't1').
+	self assert: tool outputTokens isNil.
+	self append: { (self
+			 callLine: 'a1'
+			 call: 'm1'
+			 block: (self toolBlock: 't1')
+			 output: 70
+			 thinking: 0) }.
+	log handleHookEvent: (self event: 'Stop').
+	self assert: tool outputTokens equals: 70
+]
+
 { #category : 'tests' }
 CMTranscriptFollowingTest >> testToolCallsHangUnderThePrecedingMessage [
 
@@ -223,6 +387,25 @@ CMTranscriptFollowingTest >> testTranscriptTimesAreLocal [
 	message := prompt children first.
 	self assert: message startedAt equals: (DateAndTime fromString: '2026-11-15T12:00:00.000Z').
 	self assert: message startedAt offset equals: DateAndTime now offset
+]
+
+{ #category : 'helpers' }
+CMTranscriptFollowingTest >> textBlock: aString [
+
+	^ '{"type":"text","text":"' , aString , '"}'
+]
+
+{ #category : 'helpers' }
+CMTranscriptFollowingTest >> thinkingBlock: aString [
+
+	^ '{"type":"thinking","thinking":"' , aString , '"}'
+]
+
+{ #category : 'helpers' }
+CMTranscriptFollowingTest >> toolBlock: anId [
+	"A Bash call, like the one pre: sends"
+
+	^ '{"type":"tool_use","id":"' , anId , '","name":"Bash","input":{"command":"ls"}}'
 ]
 
 { #category : 'helpers' }
