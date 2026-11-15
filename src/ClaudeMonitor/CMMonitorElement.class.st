@@ -83,8 +83,10 @@ CMMonitorElement >> applyFilterTo: aRow [
 CMMonitorElement >> buildBody [
 
 	| detailScroller |
+	"The right padding leaves room for the scrollbar laid over the list"
 	list := BlElement new
 		        layout: BlLinearLayout vertical;
+		        padding: (BlInsets right: 12);
 		        constraintsDo: [ :c |
 				        c horizontal matchParent.
 				        c vertical fitContent ];
@@ -110,7 +112,7 @@ CMMonitorElement >> buildBody [
 				  c horizontal matchParent.
 				  c vertical matchParent ];
 		  addChildren: {
-				  ((self scrollable: list)
+				  ((self withScrollbar: (self scrollable: list))
 					   constraintsDo: [ :c | c linear weight: 0.55 ];
 					   yourself).
 				  (BlElement new
@@ -588,4 +590,22 @@ CMMonitorElement >> updateSessionRowFor: aSession [
 CMMonitorElement >> visibleRows [
 
 	^ list children select: [ :each | (each isKindOf: CMActivityRowElement) and: [ each visibility isVisible ] ]
+]
+
+{ #category : 'initialization' }
+CMMonitorElement >> withScrollbar: aScrollable [
+	"A pane holding aScrollable with a vertical scrollbar laid over its right edge"
+
+	^ BlElement new
+		  constraintsDo: [ :c |
+				  c horizontal matchParent.
+				  c vertical matchParent ];
+		  addChild: aScrollable;
+		  addChild: (BlVerticalScrollbarElement new
+				   constraintsDo: [ :c |
+						   c ignoreByLayout.
+						   c ignored horizontal alignRight ];
+				   attachTo: aScrollable;
+				   yourself);
+		  yourself
 ]
