@@ -55,7 +55,10 @@ CMActivityRowElement >> buildRow [
 				 right: 8);
 		clipChildren: true.
 	disclosure := (self column: CMStyle disclosureWidth alignRight: false)
-		              addChild: (CMStyle label: (CMStyle text: ''));
+		              addChild: (BlElement new
+				               extent: CMStyle disclosureSize asPoint;
+				               background: CMStyle disclosureColor;
+				               yourself);
 		              yourself.
 	statusDot := BlElement new
 		             extent: CMStyle dotSize asPoint;
@@ -126,16 +129,6 @@ CMActivityRowElement >> disclosure [
 ]
 
 { #category : 'updating' }
-CMActivityRowElement >> disclosureString [
-	"Plain characters: the UI font has no triangles"
-
-	activity hasChildren ifFalse: [ ^ '' ].
-	^ self isExpanded
-		  ifTrue: [ '-' ]
-		  ifFalse: [ '+' ]
-]
-
-{ #category : 'updating' }
 CMActivityRowElement >> durationString [
 
 	activity isPrompt ifTrue: [ ^ '' ].
@@ -172,7 +165,7 @@ CMActivityRowElement >> update [
 
 	statusDot background: (CMStyle colorForStatus: activity status).
 	durationLabel text: (CMStyle code: self durationString).
-	disclosure ifNotNil: [ disclosure children first text: (CMStyle text: self disclosureString) ].
+	self updateDisclosure.
 	self updateBackground
 ]
 
@@ -185,4 +178,28 @@ CMActivityRowElement >> updateBackground [
 					 activity isPrompt
 						 ifTrue: [ CMStyle promptRowColor ]
 						 ifFalse: [ Color white ] ])
+]
+
+{ #category : 'updating' }
+CMActivityRowElement >> updateDisclosure [
+	"A triangle pointing down when my tool calls are shown, right when they are folded; none without tool calls"
+
+	| triangle size |
+	disclosure ifNil: [ ^ self ].
+	triangle := disclosure children first.
+	activity hasChildren ifFalse: [ ^ triangle visibility: BlVisibility hidden ].
+	size := CMStyle disclosureSize.
+	triangle
+		visibility: BlVisibility visible;
+		geometry: (BlPolygonGeometry vertices: (self isExpanded
+						  ifTrue: [
+								  {
+									  (0 @ (size * 0.15)).
+									  (size @ (size * 0.15)).
+									  (size / 2 @ (size * 0.9)) } ]
+						  ifFalse: [
+								  {
+									  (size * 0.15 @ 0).
+									  (size * 0.9 @ (size / 2)).
+									  (size * 0.15 @ size) } ]))
 ]

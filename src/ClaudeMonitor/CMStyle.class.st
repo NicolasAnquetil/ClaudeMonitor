@@ -70,10 +70,23 @@ CMStyle class >> defaultFontSize [
 	^ 15
 ]
 
+{ #category : 'colors' }
+CMStyle class >> disclosureColor [
+
+	^ Color r: 0.3 g: 0.33 b: 0.48
+]
+
+{ #category : 'sizes' }
+CMStyle class >> disclosureSize [
+	"Side of the fold/unfold triangle"
+
+	^ (self fontSize * 0.75) rounded
+]
+
 { #category : 'sizes' }
 CMStyle class >> disclosureWidth [
 
-	^ self fontSize
+	^ (self fontSize * 1.2) rounded
 ]
 
 { #category : 'sizes' }
