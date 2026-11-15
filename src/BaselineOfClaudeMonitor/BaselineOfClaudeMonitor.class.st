@@ -19,8 +19,10 @@ BaselineOfClaudeMonitor >> baseline: spec [
 	<baseline>
 	spec for: #common do: [
 			spec baseline: 'Bloc' with: [ spec repository: 'github://pharo-graphics/Bloc:v3.0.0/src' ].
+			"Toplo v0.11.0 is the version built on Bloc v3.0.0"
+			spec baseline: 'Toplo' with: [ spec repository: 'github://pharo-graphics/Toplo:v0.11.0/src' ].
 			spec
-				package: 'ClaudeMonitor' with: [ spec requires: #( 'Bloc' ) ];
+				package: 'ClaudeMonitor' with: [ spec requires: #( 'Bloc' 'Toplo' ) ];
 				package: 'ClaudeMonitor-Tests' with: [ spec requires: #( 'ClaudeMonitor' ) ].
 			spec
 				group: 'Core' with: #( 'ClaudeMonitor' );

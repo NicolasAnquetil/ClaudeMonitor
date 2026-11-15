@@ -1,6 +1,6 @@
 # ClaudeMonitor
 
-A live view, in a Pharo [Bloc](https://github.com/pharo-graphics/Bloc) window, of what Claude Code does in a workspace: every tool call (shell commands, file edits, Pharo MCP calls...) with why it was made, its full input, its result and its duration, plus the prompts you submit.
+A live view, in a Pharo window built with [Toplo](https://github.com/pharo-graphics/Toplo) (widgets on top of [Bloc](https://github.com/pharo-graphics/Bloc)), of what Claude Code does in a workspace: every tool call (shell commands, file edits, Pharo MCP calls...) with why it was made, its full input, its result and its duration, plus the prompts you submit.
 
 Claude Code [hooks](https://docs.claude.com/en/docs/claude-code/hooks) POST each event to a small HTTP server in the image (localhost, port 8091).
 
@@ -22,14 +22,22 @@ CMMonitor stop.    "stop receiving events"
 CMMonitor reset.   "stop and forget the activities"
 ```
 
-The window lists the activities, newest on top: a status dot (orange running, green ok, red failed), the time, the tool, a summary and the duration. Click one to see its details:
+This loads Bloc v3.0.0 and Toplo v0.11.0 (the Toplo version built on that Bloc).
+
+The window shows a tree, newest on top: each Claude Code session, the prompts you submitted in it, and under each prompt the tool calls it led to. Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
+
+Keys: up and down move in the list; left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call.
+
+Select a row to see its details on the right (the text can be selected and copied; drag the divider to resize the panes):
 
 - **Why**: the description Claude gives with a shell command.
 - **Explanation**: the text Claude wrote just before the call, read from the session transcript (best effort: not every text reaches the transcript).
 - **Input**: the full command, code or file content, then the other arguments.
 - **Response** or **Error**: what the tool answered (cut after 20000 characters).
 
-*Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...).
+*Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Clear* hides what happened until now; *A-* and *A+* change the font size.
+
+`CMMonitor default openBloc` opens the former window, built with Bloc only.
 
 ## Claude Code hooks
 

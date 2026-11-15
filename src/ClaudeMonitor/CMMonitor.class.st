@@ -78,8 +78,16 @@ CMMonitor >> log [
 	^ log ifNil: [ log := CMActivityLog new ]
 ]
 
-{ #category : 'opening' }
+{ #category : 'ui' }
 CMMonitor >> open [
+	"Open a window on my log"
+
+	^ CMToploMonitorElement openOn: self log
+]
+
+{ #category : 'ui' }
+CMMonitor >> openBloc [
+	"Open the former window, built with Bloc only"
 
 	| element space |
 	element := CMMonitorElement new
