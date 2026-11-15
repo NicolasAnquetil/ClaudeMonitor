@@ -178,12 +178,30 @@ CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 	aText append: (CMStyle small: aSession dateString , '   session ' , aSession id)
 ]
 
+{ #category : 'table' }
+CMToploMonitorElement >> applyArrowTokens [
+	"Solid triangles to fold and unfold, sized with the font, instead of the theme's small chevrons"
+
+	table
+		addTokenNamed: #'iconic-arrow-right' withValue: (ToMaterialDesignIconProvider innerImageNamed: #filled_arrowright);
+		addTokenNamed: #'iconic-arrow-down' withValue: (ToMaterialDesignIconProvider innerImageNamed: #filled_arrowdropdown);
+		addTokenNamed: #'iconic-arrow-breadth' withValue: self arrowBreadth
+]
+
+{ #category : 'table' }
+CMToploMonitorElement >> arrowBreadth [
+
+	^ (CMStyle fontSize * 1.4) rounded
+]
+
 { #category : 'initialization' }
 CMToploMonitorElement >> buildBody [
 	"The list and the details side by side, with a divider that can be dragged"
 
 	| pane |
 	table := self newTable.
+	table useScrollbar: true.
+	self applyArrowTokens.
 	table constraintsDo: [ :c | c linear weight: 0.6 ].
 	table addEventHandlerOn: BlElementExtentChangedEvent do: [ :event | self fitColumns ].
 	detail := ToAlbum new
@@ -259,6 +277,7 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 
 	CMStyle fontSize: CMStyle fontSize + aNumber.
 	title text: (CMStyle heading: title text asString).
+	self applyArrowTokens.
 	self reload.
 	selected ifNotNil: [ self showDetail: selected ]
 ]
@@ -345,13 +364,14 @@ CMToploMonitorElement >> durationStringOf: anActivity [
 
 { #category : 'table' }
 CMToploMonitorElement >> fitColumns [
-	"The Activity column takes the width left by the fixed ones. Toplo applies a column width to
-	the rows already built without their tree indentation, so they are built again, on the next frame"
+	"The Activity column takes the width left by the fixed ones, the fold arrow (rows have it, not the
+	header) and the scrollbar. Toplo applies a column width to the rows already built without their
+	tree indentation, so they are built again, on the next frame"
 
 	| first width |
 	table header cellContainers ifEmpty: [ ^ self ].
 	first := table header cellContainers first.
-	width := (table width - self timeColumnWidth - self durationColumnWidth - 24) rounded max: 150.
+	width := (table width - self timeColumnWidth - self durationColumnWidth - self arrowBreadth - 30) rounded max: 150.
 	(first width - width) abs < 4 ifTrue: [ ^ self ].
 	first updateWidthWith: width.
 	self inUIThread: [ self reload ]
