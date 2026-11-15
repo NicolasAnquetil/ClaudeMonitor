@@ -1,0 +1,103 @@
+"
+I read a Claude Code session transcript (a JSON Lines file) to find what Claude wrote just before a tool call: the text blocks of the assistant messages between the previous user entry and the tool_use with the given id.
+
+Transcripts grow to several megabytes, so I only read the last tailSize bytes. If the tool_use is not in the transcript yet, I take the assistant text at the end of the file.
+"
+Class {
+	#name : 'CMTranscriptReader',
+	#superclass : 'Object',
+	#instVars : [
+		'tailSize'
+	],
+	#category : 'ClaudeMonitor-Model',
+	#package : 'ClaudeMonitor',
+	#tag : 'Model'
+}
+
+{ #category : 'private' }
+CMTranscriptReader >> contentOf: anEntry [
+
+	| message content |
+	message := anEntry at: 'message' ifAbsent: [ ^ #(  ) ].
+	message isDictionary ifFalse: [ ^ #(  ) ].
+	content := message at: 'content' ifAbsent: [ ^ #(  ) ].
+	^ content isArray
+		  ifTrue: [ content ]
+		  ifFalse: [ #(  ) ]
+]
+
+{ #category : 'private' }
+CMTranscriptReader >> entry: anEntry hasToolUse: aToolUseId [
+
+	^ (self contentOf: anEntry) anySatisfy: [ :block |
+			  block isDictionary and: [
+				  (block at: 'type' ifAbsent: [ nil ]) = 'tool_use' and: [ (block at: 'id' ifAbsent: [ nil ]) = aToolUseId ] ] ]
+]
+
+{ #category : 'reading' }
+CMTranscriptReader >> explanationIn: aFileReference beforeToolUse: aToolUseId [
+	"The assistant text written since the last user entry, up to the tool_use with this id
+	(or up to the end of the transcript when that tool_use is not written yet). Nil if there is none."
+
+	| entries end texts |
+	aFileReference exists ifFalse: [ ^ nil ].
+	entries := self tailEntriesOf: aFileReference.
+	end := aToolUseId ifNil: [ 0 ] ifNotNil: [ entries findLast: [ :each | self entry: each hasToolUse: aToolUseId ] ].
+	end = 0 ifTrue: [ end := entries size + 1 ].
+	texts := OrderedCollection new.
+	end - 1 to: 1 by: -1 do: [ :index |
+			| type |
+			type := (entries at: index) at: 'type' ifAbsent: [ nil ].
+			type = 'user' ifTrue: [ ^ self join: texts ].
+			type = 'assistant' ifTrue: [ (self textsOf: (entries at: index)) reverseDo: [ :each | texts addFirst: each ] ] ].
+	^ self join: texts
+]
+
+{ #category : 'private' }
+CMTranscriptReader >> join: someTexts [
+
+	| text |
+	text := String lf , String lf join: (someTexts collect: [ :each | each trimBoth ]).
+	^ text isEmpty
+		  ifTrue: [ nil ]
+		  ifFalse: [ text ]
+]
+
+{ #category : 'reading' }
+CMTranscriptReader >> tailEntriesOf: aFileReference [
+	"The JSON entries of the last tailSize bytes, skipping the first line, which may be cut"
+
+	| bytes start lines |
+	bytes := aFileReference binaryReadStreamDo: [ :stream |
+			         stream size > self tailSize ifTrue: [ stream position: stream size - self tailSize ].
+			         stream upToEnd ].
+	start := 1.
+	aFileReference size > self tailSize ifTrue: [ start := (bytes indexOf: 10) + 1 ].
+	lines := (bytes copyFrom: start to: bytes size) utf8Decoded lines.
+	^ lines
+		  collect: [ :line |
+				  [ STONJSON fromString: line ]
+					  on: Error
+					  do: [ nil ] ]
+		  thenSelect: [ :each | each isDictionary ]
+]
+
+{ #category : 'accessing' }
+CMTranscriptReader >> tailSize [
+
+	^ tailSize ifNil: [ 400 * 1024 ]
+]
+
+{ #category : 'accessing' }
+CMTranscriptReader >> tailSize: anInteger [
+
+	tailSize := anInteger
+]
+
+{ #category : 'private' }
+CMTranscriptReader >> textsOf: anEntry [
+
+	^ (self contentOf: anEntry)
+		  select: [ :block | block isDictionary and: [ (block at: 'type' ifAbsent: [ nil ]) = 'text' ] ]
+		  thenCollect: [ :block | block at: 'text' ifAbsent: [ '' ] ]
+]
