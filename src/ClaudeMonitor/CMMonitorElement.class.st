@@ -15,7 +15,8 @@ Class {
 		'detail',
 		'rowsById',
 		'selected',
-		'hideReads'
+		'hideReads',
+		'sessionRows'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -30,19 +31,17 @@ CMMonitorElement >> addLine: aText [
 
 { #category : 'updating' }
 CMMonitorElement >> addRowFor: anActivity [
+	"Insert the row just below the title of its session: newest first within each session"
 
-	| row |
+	| row sessionRow |
 	(rowsById includesKey: anActivity id) ifTrue: [ ^ self updateRowFor: anActivity ].
 	row := CMActivityRowElement new activity: anActivity.
 	row addEventHandlerOn: BlClickEvent do: [ :event | self select: anActivity ].
 	self applyFilterTo: row.
 	rowsById at: anActivity id put: row.
-	list addChild: row at: 1.
-	[ list childrenCount > self maxRows ] whileTrue: [
-			| last |
-			last := list children last.
-			rowsById removeKey: last activity id ifAbsent: [ ].
-			list removeChild: last ].
+	sessionRow := self sessionRowFor: anActivity.
+	list addChild: row at: (list childIndexOf: sessionRow) + 1.
+	self trimRows.
 	self updateHeader
 ]
 
@@ -185,6 +184,7 @@ CMMonitorElement >> clear [
 
 	list removeChildren.
 	rowsById removeAll.
+	self sessionRows removeAll.
 	selected := nil.
 	detail removeChildren.
 	self updateHeader
@@ -250,7 +250,8 @@ CMMonitorElement >> log: anActivityLog [
 	log activities do: [ :each | self addRowFor: each ].
 	log announcer
 		when: CMActivityAdded do: [ :ann | self inUIThread: [ self addRowFor: ann activity ] ] for: self;
-		when: CMActivityChanged do: [ :ann | self inUIThread: [ self updateRowFor: ann activity ] ] for: self.
+		when: CMActivityChanged do: [ :ann | self inUIThread: [ self updateRowFor: ann activity ] ] for: self;
+		when: CMSessionChanged do: [ :ann | self inUIThread: [ self updateSessionRowFor: ann session ] ] for: self.
 	self updateHeader
 ]
 
@@ -307,6 +308,7 @@ CMMonitorElement >> rebuild [
 	previous := selected.
 	self removeChildren.
 	rowsById removeAll.
+	self sessionRows removeAll.
 	selected := nil.
 	self buildContent.
 	log ifNotNil: [ log activities do: [ :each | self addRowFor: each ] ].
@@ -352,6 +354,29 @@ CMMonitorElement >> select: anActivity [
 CMMonitorElement >> selected [
 
 	^ selected
+]
+
+{ #category : 'sessions' }
+CMMonitorElement >> sessionRowFor: anActivity [
+	"The title row of the activity's session, added on top of the list when this session is new to me"
+
+	| key session row |
+	key := anActivity sessionId ifNil: [ '?' ].
+	^ self sessionRows at: key ifAbsent: [
+			  session := (log ifNotNil: [ log sessionWithId: key ]) ifNil: [
+					             CMSession new
+						             id: key;
+						             startedAt: anActivity startedAt;
+						             yourself ].
+			  row := CMSessionRowElement new session: session.
+			  list addChild: row at: 1.
+			  self sessionRows at: key put: row ]
+]
+
+{ #category : 'sessions' }
+CMMonitorElement >> sessionRows [
+
+	^ sessionRows ifNil: [ sessionRows := Dictionary new ]
 ]
 
 { #category : 'detail' }
@@ -403,6 +428,23 @@ CMMonitorElement >> toggleHideReads: aButton [
 ]
 
 { #category : 'updating' }
+CMMonitorElement >> trimRows [
+	"Forget the oldest rows beyond maxRows, and the title of a session left with no rows"
+
+	[ rowsById size > self maxRows ] whileTrue: [
+			| last |
+			last := list children last.
+			list removeChild: last.
+			(last isKindOf: CMActivityRowElement) ifTrue: [ rowsById removeKey: last activity id ifAbsent: [ ] ].
+			(last isKindOf: CMSessionRowElement) ifTrue: [ self sessionRows removeKey: last session id ifAbsent: [ ] ] ].
+	(list hasChildren and: [ list children last isKindOf: CMSessionRowElement ]) ifTrue: [
+			| last |
+			last := list children last.
+			list removeChild: last.
+			self sessionRows removeKey: last session id ifAbsent: [ ] ]
+]
+
+{ #category : 'updating' }
 CMMonitorElement >> updateHeader [
 
 	| running failed |
@@ -420,4 +462,10 @@ CMMonitorElement >> updateRowFor: anActivity [
 	rowsById at: anActivity id ifPresent: [ :row | row update ].
 	selected == anActivity ifTrue: [ self showDetail: anActivity ].
 	self updateHeader
+]
+
+{ #category : 'sessions' }
+CMMonitorElement >> updateSessionRowFor: aSession [
+
+	self sessionRows at: aSession id ifPresent: [ :row | row update ]
 ]

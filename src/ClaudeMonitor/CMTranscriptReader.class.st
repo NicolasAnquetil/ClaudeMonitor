@@ -64,6 +64,23 @@ CMTranscriptReader >> join: someTexts [
 ]
 
 { #category : 'reading' }
+CMTranscriptReader >> startTimeIn: aFileReference [
+	"The timestamp of the first transcript entry that has one, in local time. Nil if none."
+
+	aFileReference exists ifFalse: [ ^ nil ].
+	aFileReference readStreamDo: [ :stream |
+			[ stream atEnd ] whileFalse: [
+					([ STONJSON fromString: stream nextLine ]
+						 on: Error
+						 do: [ nil ]) ifNotNil: [ :entry |
+							(entry isDictionary and: [ entry includesKey: 'timestamp' ]) ifTrue: [
+									^ [ (DateAndTime fromString: (entry at: 'timestamp')) asLocal ]
+										  on: Error
+										  do: [ nil ] ] ] ] ].
+	^ nil
+]
+
+{ #category : 'reading' }
 CMTranscriptReader >> tailEntriesOf: aFileReference [
 	"The JSON entries of the last tailSize bytes, skipping the first line, which may be cut"
 
@@ -100,4 +117,16 @@ CMTranscriptReader >> textsOf: anEntry [
 	^ (self contentOf: anEntry)
 		  select: [ :block | block isDictionary and: [ (block at: 'type' ifAbsent: [ nil ]) = 'text' ] ]
 		  thenCollect: [ :block | block at: 'text' ifAbsent: [ '' ] ]
+]
+
+{ #category : 'reading' }
+CMTranscriptReader >> titleIn: aFileReference [
+	"The latest session title: a custom-title (set with /rename) wins over an ai-title. Nil if none yet."
+
+	| custom ai |
+	aFileReference exists ifFalse: [ ^ nil ].
+	(self tailEntriesOf: aFileReference) do: [ :entry |
+			(entry at: 'type' ifAbsent: [ nil ]) = 'custom-title' ifTrue: [ custom := entry at: 'customTitle' ifAbsent: [ custom ] ].
+			(entry at: 'type' ifAbsent: [ nil ]) = 'ai-title' ifTrue: [ ai := entry at: 'aiTitle' ifAbsent: [ ai ] ] ].
+	^ custom ifNil: [ ai ]
 ]

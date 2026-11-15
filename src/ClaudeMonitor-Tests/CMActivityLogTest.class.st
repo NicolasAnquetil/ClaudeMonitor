@@ -66,6 +66,19 @@ CMActivityLogTest >> testChangesAreAnnounced [
 ]
 
 { #category : 'tests' }
+CMActivityLogTest >> testEventsGiveTheirSession [
+
+	| session |
+	log handleHookEvent: (self pre: 't1').
+	log handleHookEvent: (self post: 't1').
+	self assert: log sessions size equals: 1.
+	session := log sessionWithId: 's1'.
+	self assert: session id equals: 's1'.
+	self assert: session startedAt isNotNil.
+	self assert: session displayTitle equals: 'Session s1'
+]
+
+{ #category : 'tests' }
 CMActivityLogTest >> testFailureMarksTheActivityFailed [
 
 	| failure |
@@ -128,6 +141,22 @@ CMActivityLogTest >> testPromptIsRecorded [
 	self assert: activity isPrompt.
 	self assert: activity summary equals: 'restart the client'.
 	self assert: activity shortToolName equals: 'prompt'
+]
+
+{ #category : 'tests' }
+CMActivityLogTest >> testSessionDateString [
+
+	| session |
+	session := CMSession new
+		           startedAt: (DateAndTime
+				            year: 2026
+				            month: 11
+				            day: 15
+				            hour: 11
+				            minute: 27
+				            second: 34);
+		           yourself.
+	self assert: session dateString equals: 'Sun 15 Nov 2026, 11:27'
 ]
 
 { #category : 'tests' }

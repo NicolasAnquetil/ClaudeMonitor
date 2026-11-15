@@ -14,7 +14,8 @@ Class {
 		'announcer',
 		'mutex',
 		'transcriptReader',
-		'rawEvents'
+		'rawEvents',
+		'sessions'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -67,6 +68,7 @@ CMActivityLog >> handleHookEvent: aDictionary [
 	"Create or complete the activity a Claude Code hook payload reports. Unknown events are ignored."
 
 	self rememberRawEvent: aDictionary.
+	self noteSessionOf: aDictionary.
 	aDictionary at: 'hook_event_name' ifPresent: [ :event |
 			event = 'PreToolUse' ifTrue: [ ^ self toolStarted: aDictionary ].
 			event = 'PostToolUse' ifTrue: [ ^ self tool: aDictionary finishedWith: #ok ].
@@ -81,6 +83,7 @@ CMActivityLog >> initialize [
 	super initialize.
 	activities := OrderedCollection new.
 	byId := Dictionary new.
+	sessions := Dictionary new.
 	announcer := Announcer new.
 	mutex := Mutex new.
 	rawEvents := OrderedCollection new.
@@ -97,6 +100,27 @@ CMActivityLog >> maxRawEvents [
 CMActivityLog >> maxResponseSize [
 
 	^ 20000
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> noteSessionOf: aDictionary [
+	"Make sure the session of this event is known, and its title up to date.
+	The title is read again at most every titleCheckPeriod, as Claude Code updates it."
+
+	| id session isNew |
+	id := aDictionary at: 'session_id' ifAbsent: [ ^ nil ].
+	isNew := false.
+	session := mutex critical: [
+			           sessions at: id ifAbsentPut: [
+					           isNew := true.
+					           CMSession new
+						           id: id;
+						           yourself ] ].
+	aDictionary at: 'transcript_path' ifPresent: [ :path | session transcript ifNil: [ session transcript: path asFileReference ] ].
+	isNew ifTrue: [ session startedAt: (self startTimeOf: session) ].
+	(isNew or: [ session titleCheckedAt isNil or: [ DateAndTime now - session titleCheckedAt > self titleCheckPeriod ] ]) ifTrue: [
+		self refreshTitleOf: session ].
+	^ session
 ]
 
 { #category : 'hook events' }
@@ -121,6 +145,22 @@ CMActivityLog >> promptSubmitted: aDictionary [
 CMActivityLog >> rawEvents [
 
 	^ mutex critical: [ rawEvents copy ]
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> refreshTitleOf: aSession [
+
+	| newTitle |
+	aSession titleCheckedAt: DateAndTime now.
+	aSession transcript ifNil: [ ^ self ].
+	newTitle := [ transcriptReader titleIn: aSession transcript ]
+		            on: Error
+		            do: [ nil ].
+	(newTitle isNil or: [ newTitle = aSession title ]) ifTrue: [ ^ self ].
+	aSession title: newTitle.
+	announcer announce: (CMSessionChanged new
+			 session: aSession;
+			 yourself)
 ]
 
 { #category : 'private' }
@@ -148,10 +188,37 @@ CMActivityLog >> responseTextIn: aDictionary [
 		  ifFalse: [ text ]
 ]
 
+{ #category : 'sessions' }
+CMActivityLog >> sessionWithId: aString [
+
+	^ mutex critical: [ sessions at: aString ifAbsent: [ nil ] ]
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> sessions [
+
+	^ mutex critical: [ sessions copy ]
+]
+
 { #category : 'accessing' }
 CMActivityLog >> size [
 
 	^ mutex critical: [ activities size ]
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> startTimeOf: aSession [
+
+	^ (aSession transcript ifNotNil: [ :file |
+			   [ transcriptReader startTimeIn: file ]
+				   on: Error
+				   do: [ nil ] ]) ifNil: [ DateAndTime now ]
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> titleCheckPeriod [
+
+	^ 20 seconds
 ]
 
 { #category : 'hook events' }

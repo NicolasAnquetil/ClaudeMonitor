@@ -12,6 +12,19 @@ Class {
 }
 
 { #category : 'tests' }
+CMTranscriptReaderTest >> testCustomTitleWins [
+
+	| file |
+	file := self titledTranscript.
+	file writeStreamDo: [ :stream |
+			stream
+				setToEnd;
+				nextPutAll: '{"type":"custom-title","customTitle":"My name"}';
+				lf ].
+	self assert: (CMTranscriptReader new titleIn: file) equals: 'My name'
+]
+
+{ #category : 'tests' }
 CMTranscriptReaderTest >> testExplanationBeforeAToolUse [
 
 	self assert: (CMTranscriptReader new explanationIn: self transcript beforeToolUse: 't1') equals: 'First I look.'
@@ -21,6 +34,12 @@ CMTranscriptReaderTest >> testExplanationBeforeAToolUse [
 CMTranscriptReaderTest >> testMissingFile [
 
 	self assert: (CMTranscriptReader new explanationIn: FileSystem memory / 'none.jsonl' beforeToolUse: 't1') isNil
+]
+
+{ #category : 'tests' }
+CMTranscriptReaderTest >> testNoTitleYet [
+
+	self assert: (CMTranscriptReader new titleIn: self transcript) isNil
 ]
 
 { #category : 'tests' }
@@ -40,9 +59,38 @@ CMTranscriptReaderTest >> testParallelToolUsesShareTheExplanation [
 ]
 
 { #category : 'tests' }
+CMTranscriptReaderTest >> testStartTimeIsTheFirstTimestamp [
+
+	self
+		assert: (CMTranscriptReader new startTimeIn: self titledTranscript)
+		equals: (DateAndTime fromString: '2026-11-15T10:27:34.232Z')
+]
+
+{ #category : 'tests' }
+CMTranscriptReaderTest >> testTitleIsTheLatestAiTitle [
+
+	self assert: (CMTranscriptReader new titleIn: self titledTranscript) equals: 'Better title'
+]
+
+{ #category : 'tests' }
 CMTranscriptReaderTest >> testUnknownToolUseTakesTheTextAtTheEnd [
 
 	self assert: (CMTranscriptReader new explanationIn: self transcript beforeToolUse: 'not-yet') equals: 'Then I fix.'
+]
+
+{ #category : 'tests' }
+CMTranscriptReaderTest >> titledTranscript [
+
+	| file |
+	file := FileSystem memory / 'titled.jsonl'.
+	file writeStreamDo: [ :stream |
+			#( '{"type":"mode","mode":"normal"}' '{"type":"user","timestamp":"2026-11-15T10:27:34.232Z","message":{"content":"hi"}}'
+			   '{"type":"ai-title","aiTitle":"First title"}' '{"type":"user","timestamp":"2026-11-15T10:30:00.000Z","message":{"content":"more"}}'
+			   '{"type":"ai-title","aiTitle":"Better title"}' ) do: [ :line |
+					stream
+						nextPutAll: line;
+						lf ] ].
+	^ file
 ]
 
 { #category : 'tests' }
