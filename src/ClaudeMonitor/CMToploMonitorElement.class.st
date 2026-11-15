@@ -20,7 +20,8 @@ Class {
 		'selected',
 		'hideReads',
 		'collapsed',
-		'clearedAt'
+		'clearedAt',
+		'reloadPending'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -68,7 +69,7 @@ CMToploMonitorElement >> activityAdded: anActivity [
 				wrapper isExpanded ifTrue: [
 						rowIndex := (self insertionIndexOf: anActivity under: ownerIndex) + 1.
 						table dataAccessor useParentWrapper: wrapper while: [ table dataAccessor add: anActivity afterIndex: rowIndex - 1 ].
-						((anActivity isPrompt or: [ anActivity hasChildren ]) and: [ (collapsed includes: anActivity) not ]) ifTrue: [
+						((anActivity isPrompt or: [ anActivity isMessage or: [ anActivity hasChildren ] ]) and: [ (collapsed includes: anActivity) not ]) ifTrue: [
 							(self wrapperAt: rowIndex) expand ] ] ].
 	self keepSelection.
 	"The owner may have had no children: show its fold arrow"
@@ -538,7 +539,8 @@ CMToploMonitorElement >> log: anActivityLog [
 	log announcer
 		when: CMActivityAdded do: [ :ann | self inUIThread: [ self activityAdded: ann activity ] ] for: self;
 		when: CMActivityChanged do: [ :ann | self inUIThread: [ self activityChanged: ann activity ] ] for: self;
-		when: CMSessionChanged do: [ :ann | self inUIThread: [ self sessionChanged: ann session ] ] for: self
+		when: CMSessionChanged do: [ :ann | self inUIThread: [ self sessionChanged: ann session ] ] for: self;
+		when: CMActivitiesRegrouped do: [ :ann | self scheduleReload ] for: self
 ]
 
 { #category : 'detail' }
@@ -634,6 +636,18 @@ CMToploMonitorElement >> reload [
 			(wrapper isExpanded not and: [ (collapsed includes: wrapper dataItem) not ]) ifTrue: [ wrapper expand ].
 			index := index + 1 ].
 	self updateTitle
+]
+
+{ #category : 'updating' }
+CMToploMonitorElement >> scheduleReload [
+	"Activities moved: show the tree again, once for a burst of moves"
+
+	reloadPending == true ifTrue: [ ^ self ].
+	reloadPending := true.
+	self inUIThread: [
+			reloadPending := false.
+			self reload.
+			self keepSelection ]
 ]
 
 { #category : 'detail' }

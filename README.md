@@ -26,8 +26,8 @@ This loads Bloc v3.0.0 and Toplo v0.11.0 (the Toplo version built on that Bloc).
 
 The window shows a tree, newest on top: each Claude Code session, the prompts you submitted in it, and under each prompt what Claude did for it, in order:
 
-- the tool calls,
 - the messages Claude wrote and its thinking, read from the session transcript at each hook event (the transcript keeps the text of only part of the thinking: the rest is skipped),
+- the tool calls, each under the message Claude wrote just before it (or under the prompt when there is none),
 - for a to-do list (`TodoWrite`) or a plan (`ExitPlanMode`), one row per step under the call, with its state (done, in progress, pending).
 Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
 

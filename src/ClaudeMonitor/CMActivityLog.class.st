@@ -213,6 +213,15 @@ CMActivityLog >> noteTranscriptEntry: anEntry inSession: aSessionId [
 ]
 
 { #category : 'hierarchy' }
+CMActivityLog >> ownerOfToolFor: aDictionary [
+	"A tool call hangs under the last message of its prompt, or under the prompt"
+
+	| prompt |
+	prompt := (self parentFor: aDictionary) ifNil: [ ^ nil ].
+	^ prompt children reversed detect: [ :each | each isMessage ] ifNone: [ prompt ]
+]
+
+{ #category : 'hierarchy' }
 CMActivityLog >> parentFor: aDictionary [
 	"The prompt activity this event belongs to: the one with its prompt_id,
 	else the last prompt of its session"
@@ -314,6 +323,33 @@ CMActivityLog >> registerPrompt: anActivity [
 			anActivity sessionId ifNotNil: [ :id | self lastPromptBySession at: id put: anActivity ] ]
 ]
 
+{ #category : 'hierarchy' }
+CMActivityLog >> regroupToolCallsOf: aPrompt [
+	"Put each tool call of aPrompt under the last message written before it, or under the prompt.
+	Needed when a message is read after the tool calls that follow it"
+
+	| entries owner moved |
+	entries := OrderedCollection new.
+	aPrompt children do: [ :each |
+			(each isMessage or: [ each isTool ]) ifTrue: [ entries add: each ].
+			each isMessage ifTrue: [ entries addAll: (each children select: [ :child | child isTool ]) ] ].
+	entries := entries asArray sort: [ :a :b |
+		           (a startedAt ifNil: [ DateAndTime epoch ]) <= (b startedAt ifNil: [ DateAndTime epoch ]) ].
+	owner := aPrompt.
+	moved := false.
+	entries do: [ :each |
+			each isMessage
+				ifTrue: [ owner := each ]
+				ifFalse: [
+						each parent == owner ifFalse: [
+								each moveTo: owner.
+								moved := true ] ] ].
+	moved ifTrue: [
+			announcer announce: (CMActivitiesRegrouped new
+					 prompt: aPrompt;
+					 yourself) ]
+]
+
 { #category : 'private' }
 CMActivityLog >> rememberRawEvent: aDictionary [
 
@@ -389,7 +425,8 @@ CMActivityLog >> thought: aString kind: aKind id: anId at: aTimestamp inSession:
 		            finishedAt: time;
 		            parent: prompt;
 		            yourself.
-	self add: activity
+	self add: activity.
+	(aKind = #message and: [ prompt notNil ]) ifTrue: [ self regroupToolCallsOf: prompt ]
 ]
 
 { #category : 'sessions' }
@@ -435,7 +472,7 @@ CMActivityLog >> toolStarted: aDictionary [
 						                       status: #running;
 						                       startedAt: DateAndTime now;
 						                       promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
-						                       parent: (self parentFor: aDictionary);
+						                       parent: (self ownerOfToolFor: aDictionary);
 						                       yourself.
 					            activities add: created.
 					            byId at: id put: created.

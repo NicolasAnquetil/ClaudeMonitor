@@ -85,6 +85,26 @@ CMTranscriptFollowingTest >> setUp [
 ]
 
 { #category : 'tests' }
+CMTranscriptFollowingTest >> testAMessageReadLateTakesTheToolCallsAfterIt [
+
+	| prompt early late message |
+	self append: { (self userLine: 'p1') }.
+	prompt := log handleHookEvent: (self prompt: 'p1').
+	early := log handleHookEvent: (self pre: 't0').
+	early startedAt: (DateAndTime fromString: '2026-11-15T11:00:00.000Z').
+	late := log handleHookEvent: (self pre: 't1').
+	late startedAt: (DateAndTime fromString: '2026-11-15T13:00:00.000Z').
+	"The message, at 12:00, is read only now"
+	self append: { (self assistantLine: 'a1' type: 'text' text: 'Then I fix.') }.
+	log handleHookEvent: (self event: 'Stop').
+	message := log activityWithId: 'a1#1'.
+	self assert: early parent identicalTo: prompt.
+	self assert: late parent identicalTo: message.
+	self assert: (prompt children includes: late) not.
+	self assert: message children asArray equals: { late }
+]
+
+{ #category : 'tests' }
 CMTranscriptFollowingTest >> testATodoListHasOneStepPerTodo [
 
 	| todos tool |
@@ -136,11 +156,11 @@ CMTranscriptFollowingTest >> testMessagesAndThinkingComeBeforeTheToolCallUnderTh
 			(self assistantLine: 'a1' type: 'thinking' text: 'I should look first').
 			(self assistantLine: 'a2' type: 'text' text: 'First I look.') }.
 	tool := log handleHookEvent: (self pre: 't1').
-	self assert: (prompt children collect: [ :each | each kind ]) asArray equals: #( #thinking #message #tool ).
+	self assert: (prompt children collect: [ :each | each kind ]) asArray equals: #( #thinking #message ).
 	self assert: prompt children first text equals: 'I should look first'.
 	self assert: prompt children second text equals: 'First I look.'.
 	self assert: prompt children second summary equals: 'First I look.'.
-	self assert: prompt children last identicalTo: tool
+	self assert: prompt children second children asArray equals: { tool }
 ]
 
 { #category : 'tests' }
@@ -173,6 +193,23 @@ CMTranscriptFollowingTest >> testTheTranscriptIsReadOnce [
 	self append: { (self assistantLine: 'a2' type: 'text' text: 'Two.') }.
 	log handleHookEvent: (self event: 'Stop').
 	self assert: (prompt children collect: [ :each | each text ]) asArray equals: #( 'One.' 'Two.' )
+]
+
+{ #category : 'tests' }
+CMTranscriptFollowingTest >> testToolCallsHangUnderThePrecedingMessage [
+
+	| prompt message tool |
+	self append: { (self userLine: 'p1') }.
+	prompt := log handleHookEvent: (self prompt: 'p1').
+	self append: {
+			(self assistantLine: 'a1' type: 'thinking' text: 'Let me think').
+			(self assistantLine: 'a2' type: 'text' text: 'First I look.') }.
+	tool := log handleHookEvent: (self pre: 't1').
+	message := log activityWithId: 'a2#1'.
+	self assert: tool parent identicalTo: message.
+	self assert: message children asArray equals: { tool }.
+	self assert: (prompt children collect: [ :each | each kind ]) asArray equals: #( #thinking #message ).
+	self assert: tool depth equals: 2
 ]
 
 { #category : 'tests' }

@@ -184,6 +184,12 @@ CMActivity >> isThought [
 	^ self isMessage or: [ self isThinking ]
 ]
 
+{ #category : 'testing' }
+CMActivity >> isTool [
+
+	^ kind = #tool
+]
+
 { #category : 'accessing' }
 CMActivity >> kind [
 
@@ -213,6 +219,15 @@ CMActivity >> methodSubjectFrom: aSourceOrSources in: anInput [
 			  (anInput at: 'side' ifAbsent: [ nil ]) = 'class' ifTrue: [ s << ' class' ].
 			  s << '>>'.
 			  selectors do: [ :each | s << each ] separatedBy: [ s << ', ' ] ]
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> moveTo: anActivity [
+	"Leave my parent for anActivity"
+
+	parent ifNotNil: [ :old | old children removeAllSuchThat: [ :each | each == self ] ].
+	parent := nil.
+	self parent: anActivity
 ]
 
 { #category : 'hierarchy' }
