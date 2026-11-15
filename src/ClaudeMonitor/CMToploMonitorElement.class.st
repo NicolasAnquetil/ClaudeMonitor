@@ -280,6 +280,7 @@ CMToploMonitorElement >> buildHeader [
 				  (self button: 'A-' tooltip: 'Smaller font' action: [ self changeFontSizeBy: -1 ]).
 				  (self button: 'A+' tooltip: 'Larger font' action: [ self changeFontSizeBy: 1 ]).
 				  hideReadsButton.
+				  self button: 'Collapse all' tooltip: 'Fold every prompt, message and plan' action: [ self collapseAll ].
 				  (self button: 'Clear' tooltip: 'Hide what happened until now' action: [ self clear ]) };
 		  yourself
 ]
@@ -332,6 +333,16 @@ CMToploMonitorElement >> clear [
 	selected := nil.
 	detail text: '' asRopedText.
 	self reload
+]
+
+{ #category : 'updating' }
+CMToploMonitorElement >> collapseAll [
+	"Fold every prompt, message and plan: the sessions stay open, showing one row per prompt"
+
+	collapsed := IdentitySet withAll:
+		             (log activities select: [ :each | each isPrompt or: [ each isMessage or: [ each hasChildren ] ] ]).
+	self reload.
+	self keepSelection
 ]
 
 { #category : 'detail' }

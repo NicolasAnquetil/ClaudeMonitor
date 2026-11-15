@@ -40,7 +40,7 @@ Select a row to see its details on the right (the text can be selected and copie
 - **Input**: the full command, code or file content, then the other arguments.
 - **Response** or **Error**: what the tool answered (cut after 20000 characters).
 
-*Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Clear* hides what happened until now; *A-* and *A+* change the font size.
+*Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Collapse all* folds every prompt, message and plan (one row per prompt); *Clear* hides what happened until now; *A-* and *A+* change the font size.
 ## Claude Code hooks
 
 Put this in the workspace's `.claude/settings.json` (only sessions started in that workspace are monitored). The hooks run asynchronously and fail silently, so Claude Code is never slowed down or blocked when the image is not running.
