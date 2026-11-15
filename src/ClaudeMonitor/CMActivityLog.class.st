@@ -276,33 +276,41 @@ CMActivityLog >> tool: aDictionary finishedWith: aStatus [
 
 { #category : 'hook events' }
 CMActivityLog >> toolStarted: aDictionary [
-	"Hook requests are handled concurrently, so a PostToolUse may have been handled first:
-	then complete the existing activity with what only PreToolUse tells"
+	"Hook requests are handled concurrently: a PostToolUse may have been handled first,
+	or be handled at the same time. Finding or creating the activity is one step under the lock,
+	so there is only ever one activity per tool use; PreToolUse then completes it"
 
-	| id input existing activity |
+	| id input activity isNew |
 	id := self toolUseIdIn: aDictionary.
 	input := aDictionary at: 'tool_input' ifAbsent: [ Dictionary new ].
 	input isDictionary ifFalse: [ input := Dictionary new ].
-	existing := self activityWithId: id.
-	activity := existing ifNil: [
-			            CMActivity new
-				            id: id;
-				            kind: #tool;
-				            status: #running;
-				            startedAt: DateAndTime now;
-				            promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
-				            parent: (self parentFor: aDictionary);
-				            yourself ].
+	isNew := false.
+	activity := mutex critical: [
+			            byId at: id ifAbsent: [
+					            | created |
+					            isNew := true.
+					            created := CMActivity new
+						                       id: id;
+						                       kind: #tool;
+						                       status: #running;
+						                       startedAt: DateAndTime now;
+						                       promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
+						                       parent: (self parentFor: aDictionary);
+						                       yourself.
+					            activities add: created.
+					            byId at: id put: created.
+					            created ] ].
 	activity
 		sessionId: (aDictionary at: 'session_id' ifAbsent: [ nil ]);
 		toolName: (aDictionary at: 'tool_name' ifAbsent: [ '?' ]);
 		input: input;
 		why: (input at: 'description' ifAbsent: [ nil ]).
 	activity explanation ifNil: [ activity explanation: (self explanationFor: aDictionary) ].
-	existing ifNil: [ self add: activity ] ifNotNil: [
-			announcer announce: (CMActivityChanged new
-					 activity: activity;
-					 yourself) ].
+	announcer announce: ((isNew
+			  ifTrue: [ CMActivityAdded ]
+			  ifFalse: [ CMActivityChanged ]) new
+			 activity: activity;
+			 yourself).
 	^ activity
 ]
 
