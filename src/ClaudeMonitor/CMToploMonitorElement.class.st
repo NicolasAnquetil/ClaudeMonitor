@@ -278,6 +278,7 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 	CMStyle fontSize: CMStyle fontSize + aNumber.
 	title text: (CMStyle heading: title text asString).
 	self applyArrowTokens.
+	self updateColumnTitles.
 	self reload.
 	selected ifNotNil: [ self showDetail: selected ]
 ]
@@ -505,6 +506,7 @@ CMToploMonitorElement >> newTable [
 				 title: 'Activity';
 				 key: #activity;
 				 dataIndex: [ :item | item ];
+			headerCellBuilder: [ :cell :column | self titleCellIn: cell for: column ];
 				 cellBuilder: [ :cell :item | cell addChild: (self activityCellFor: item) ];
 				 yourself).
 			(ToTableColumn new
@@ -512,6 +514,7 @@ CMToploMonitorElement >> newTable [
 				 key: #started;
 				 width: self timeColumnWidth;
 				 dataIndex: [ :item | item ];
+			headerCellBuilder: [ :cell :column | self titleCellIn: cell for: column ];
 				 cellBuilder: [ :cell :item | cell addChild: (CMStyle label: (self startedTextOf: item)) ];
 				 yourself).
 			(ToTableColumn new
@@ -519,6 +522,7 @@ CMToploMonitorElement >> newTable [
 				 key: #duration;
 				 width: self durationColumnWidth;
 				 dataIndex: [ :item | item ];
+			headerCellBuilder: [ :cell :column | self titleCellIn: cell for: column ];
 				 cellBuilder: [ :cell :item | cell addChild: (self durationCellFor: item) ];
 				 yourself) }.
 	newTable list
@@ -684,6 +688,22 @@ CMToploMonitorElement >> timeColumnWidth [
 	^ CMStyle timeColumnWidth
 ]
 
+{ #category : 'table' }
+CMToploMonitorElement >> titleCellIn: aCell for: aColumn [
+
+	aCell addChild: ((CMStyle label: (self titleTextOf: aColumn))
+			 margin: (BlInsets top: 4 bottom: 4);
+			 yourself)
+]
+
+{ #category : 'table' }
+CMToploMonitorElement >> titleTextOf: aColumn [
+
+	^ (CMStyle text: aColumn title asString size: CMStyle fontSize color: (Color r: 0.2 g: 0.25 b: 0.45))
+		  bold;
+		  yourself
+]
+
 { #category : 'updating' }
 CMToploMonitorElement >> toggleHideReads [
 
@@ -692,6 +712,14 @@ CMToploMonitorElement >> toggleHideReads [
 			 ifTrue: [ 'Show reads' ]
 			 ifFalse: [ 'Hide reads' ]).
 	self reload
+]
+
+{ #category : 'table' }
+CMToploMonitorElement >> updateColumnTitles [
+	"The header is built once: give its titles the current font size"
+
+	table header cellContainers do: [ :container |
+		container cell children ifNotEmpty: [ :labels | labels first text: (self titleTextOf: container column) ] ]
 ]
 
 { #category : 'updating' }
