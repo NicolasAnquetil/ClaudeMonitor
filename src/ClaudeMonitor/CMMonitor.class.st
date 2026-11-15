@@ -85,24 +85,6 @@ CMMonitor >> open [
 	^ CMToploMonitorElement openOn: self log
 ]
 
-{ #category : 'ui' }
-CMMonitor >> openBloc [
-	"Open the former window, built with Bloc only"
-
-	| element space |
-	element := CMMonitorElement new
-		           log: self log;
-		           yourself.
-	space := BlSpace new.
-	space
-		title: 'ClaudeMonitor';
-		extent: 1200 @ 700.
-	space root addChild: element.
-	space addEventHandlerOn: BlSpaceClosedEvent do: [ :event | element detach ].
-	space show.
-	^ space
-]
-
 { #category : 'running' }
 CMMonitor >> startServer [
 

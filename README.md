@@ -41,9 +41,6 @@ Select a row to see its details on the right (the text can be selected and copie
 - **Response** or **Error**: what the tool answered (cut after 20000 characters).
 
 *Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Clear* hides what happened until now; *A-* and *A+* change the font size.
-
-`CMMonitor default openBloc` opens the former window, built with Bloc only.
-
 ## Claude Code hooks
 
 Put this in the workspace's `.claude/settings.json` (only sessions started in that workspace are monitored). The hooks run asynchronously and fail silently, so Claude Code is never slowed down or blocked when the image is not running.

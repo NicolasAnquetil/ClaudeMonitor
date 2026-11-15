@@ -73,31 +73,6 @@ CMStyle class >> defaultFontSize [
 	^ 15
 ]
 
-{ #category : 'colors' }
-CMStyle class >> disclosureColor [
-
-	^ Color r: 0.3 g: 0.33 b: 0.48
-]
-
-{ #category : 'sizes' }
-CMStyle class >> disclosureSize [
-	"Side of the fold/unfold triangle"
-
-	^ (self fontSize * 0.75) rounded
-]
-
-{ #category : 'sizes' }
-CMStyle class >> disclosureWidth [
-
-	^ (self fontSize * 1.2) rounded
-]
-
-{ #category : 'sizes' }
-CMStyle class >> dotSize [
-
-	^ (self fontSize * 0.7) rounded
-]
-
 { #category : 'sizes' }
 CMStyle class >> durationColumnWidth [
 	"Room for 999.9 s"
@@ -117,24 +92,12 @@ CMStyle class >> fontSize: aNumber [
 	fontSize := aNumber max: 8
 ]
 
-{ #category : 'sizes' }
-CMStyle class >> headerHeight [
-
-	^ (self fontSize * 2.6) rounded
-]
-
 { #category : 'styles' }
 CMStyle class >> heading: aString [
 
 	^ (self text: aString size: self fontSize + 1 color: (Color r: 0.2 g: 0.25 b: 0.45))
 		  bold;
 		  yourself
-]
-
-{ #category : 'sizes' }
-CMStyle class >> indentWidth [
-
-	^ (self fontSize * 1.4) rounded
 ]
 
 { #category : 'styles' }
@@ -144,30 +107,12 @@ CMStyle class >> label: aText [
 ]
 
 { #category : 'styles' }
-CMStyle class >> promptRowColor [
-
-	^ Color r: 0.93 g: 0.95 b: 1.0
-]
-
-{ #category : 'styles' }
 CMStyle class >> readToolNames [
 	"Tools that only look at things, hidden by the 'Hide reads' filter"
 
 	^ #( 'Read' 'Grep' 'Glob' 'ToolSearch' 'LS' 'mcp__pharo__class_get' 'mcp__pharo__method_get' 'mcp__pharo__class_search'
 	     'mcp__pharo__method_search' 'mcp__pharo__method_source_search' 'mcp__pharo__method_reference_search'
 	     'mcp__pharo__tool_search' 'mcp__pharo__tool_get' )
-]
-
-{ #category : 'sizes' }
-CMStyle class >> rowHeight [
-
-	^ (self fontSize * 1.9) rounded
-]
-
-{ #category : 'styles' }
-CMStyle class >> selectionColor [
-
-	^ Color r: 0.85 g: 0.9 b: 1.0
 ]
 
 { #category : 'styles' }
