@@ -45,6 +45,17 @@ CMActivityLogTest >> pre: anId [
 		  yourself
 ]
 
+{ #category : 'tests' }
+CMActivityLogTest >> prompt: aPromptId [
+
+	^ Dictionary new
+		  at: 'hook_event_name' put: 'UserPromptSubmit';
+		  at: 'session_id' put: 's1';
+		  at: 'prompt_id' put: aPromptId;
+		  at: 'prompt' put: 'do ' , aPromptId;
+		  yourself
+]
+
 { #category : 'running' }
 CMActivityLogTest >> setUp [
 
@@ -202,8 +213,42 @@ b := 3';
 ]
 
 { #category : 'tests' }
+CMActivityLogTest >> testToolCallBeforeAnyPromptHasNoParent [
+
+	self assert: (log handleHookEvent: (self pre: 't1')) parent isNil
+]
+
+{ #category : 'tests' }
+CMActivityLogTest >> testToolCallsHangUnderTheirPrompt [
+
+	| p1 p2 t1 t2 |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: ((self pre: 't1')
+			       at: 'prompt_id' put: 'p1';
+			       yourself).
+	p2 := log handleHookEvent: (self prompt: 'p2').
+	t2 := log handleHookEvent: ((self pre: 't2')
+			       at: 'prompt_id' put: 'p2';
+			       yourself).
+	self assert: t1 parent identicalTo: p1.
+	self assert: t2 parent identicalTo: p2.
+	self assert: p1 children asArray equals: { t1 }.
+	self assert: p1 parent isNil.
+	self assert: t1 depth equals: 1
+]
+
+{ #category : 'tests' }
 CMActivityLogTest >> testUnknownEventIsIgnored [
 
 	self assert: (log handleHookEvent: (Dictionary with: 'hook_event_name' -> 'Stop')) isNil.
 	self assert: log size equals: 0
+]
+
+{ #category : 'tests' }
+CMActivityLogTest >> testWithoutPromptIdTheLastPromptOfTheSessionIsTheParent [
+
+	| p1 t1 |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: (self pre: 't1').
+	self assert: t1 parent identicalTo: p1
 ]

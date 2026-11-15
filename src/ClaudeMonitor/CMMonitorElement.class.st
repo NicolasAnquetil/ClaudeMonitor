@@ -31,16 +31,25 @@ CMMonitorElement >> addLine: aText [
 
 { #category : 'updating' }
 CMMonitorElement >> addRowFor: anActivity [
-	"Insert the row just below the title of its session: newest first within each session"
+	"Insert the row just below its parent (its prompt, or the title of its session): newest first at each level"
 
-	| row sessionRow |
+	| row parentRow |
 	(rowsById includesKey: anActivity id) ifTrue: [ ^ self updateRowFor: anActivity ].
 	row := CMActivityRowElement new activity: anActivity.
-	row addEventHandlerOn: BlClickEvent do: [ :event | self select: anActivity ].
-	self applyFilterTo: row.
+	row addEventHandlerOn: BlClickEvent do: [ :event |
+			self select: anActivity.
+			self requestFocus ].
+	row disclosure addEventHandlerOn: BlClickEvent do: [ :event |
+			event consumed: true.
+			self toggle: anActivity.
+			self requestFocus ].
 	rowsById at: anActivity id put: row.
-	sessionRow := self sessionRowFor: anActivity.
-	list addChild: row at: (list childIndexOf: sessionRow) + 1.
+	parentRow := anActivity parent
+		             ifNil: [ self sessionRowFor: anActivity ]
+		             ifNotNil: [ :prompt | rowsById at: prompt id ifAbsent: [ self sessionRowFor: anActivity ] ].
+	list addChild: row at: (list childIndexOf: parentRow) + 1.
+	self applyFilterTo: row.
+	anActivity parent ifNotNil: [ :prompt | rowsById at: prompt id ifPresent: [ :each | each update ] ].
 	self trimRows.
 	self updateHeader
 ]
@@ -65,14 +74,15 @@ CMMonitorElement >> addText: aString code: isCode [
 { #category : 'filtering' }
 CMMonitorElement >> applyFilterTo: aRow [
 
-	aRow visibility: ((hideReads and: [ self isRead: aRow activity ])
-			 ifTrue: [ BlVisibility gone ]
-			 ifFalse: [ BlVisibility visible ])
+	aRow visibility: ((self isShown: aRow)
+			 ifTrue: [ BlVisibility visible ]
+			 ifFalse: [ BlVisibility gone ])
 ]
 
 { #category : 'initialization' }
 CMMonitorElement >> buildBody [
 
+	| detailScroller |
 	list := BlElement new
 		        layout: BlLinearLayout vertical;
 		        constraintsDo: [ :c |
@@ -88,6 +98,12 @@ CMMonitorElement >> buildBody [
 				          c vertical fitContent ];
 		          padding: (BlInsets all: 10);
 		          yourself.
+	detailScroller := (self scrollable: detail)
+		                  constraintsDo: [ :c | c linear weight: 0.45 ];
+		                  background: (Color r: 0.985 g: 0.985 b: 0.975);
+		                  yourself.
+	"Lines are cut to the width of the pane: cut them again when it changes"
+	detailScroller addEventHandlerOn: BlElementExtentChangedEvent do: [ :event | selected ifNotNil: [ self showDetail: selected ] ].
 	^ BlElement new
 		  layout: BlLinearLayout horizontal;
 		  constraintsDo: [ :c |
@@ -103,10 +119,7 @@ CMMonitorElement >> buildBody [
 							   c horizontal exact: 1.
 							   c vertical matchParent ];
 					   yourself).
-				  ((self scrollable: detail)
-					   constraintsDo: [ :c | c linear weight: 0.45 ];
-					   background: (Color r: 0.985 g: 0.985 b: 0.975);
-					   yourself) };
+				  detailScroller };
 		  yourself
 ]
 
@@ -207,11 +220,53 @@ CMMonitorElement >> detach [
 	log ifNotNil: [ log announcer unsubscribe: self ]
 ]
 
+{ #category : 'keyboard' }
+CMMonitorElement >> goLeft [
+
+	selected ifNil: [ ^ self ].
+	rowsById at: selected id ifPresent: [ :row | (selected hasChildren and: [ row isExpanded ]) ifTrue: [ ^ self toggle: selected ] ].
+	selected parent ifNotNil: [ :prompt | self selectAndShow: prompt ]
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> goRight [
+
+	selected ifNil: [ ^ self ].
+	selected hasChildren ifFalse: [ ^ self ].
+	rowsById at: selected id ifPresent: [ :row | row isExpanded ifFalse: [ ^ self toggle: selected ] ].
+	self selectAndShow: selected children last
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> handleKey: anEvent [
+	"Up and down move to the previous or next visible row;
+	left folds a prompt or goes to the parent, right unfolds a prompt or goes to its first tool call"
+
+	| key |
+	key := anEvent key.
+	key = KeyboardKey up ifTrue: [
+			anEvent consumed: true.
+			^ self selectNextBy: -1 ].
+	key = KeyboardKey down ifTrue: [
+			anEvent consumed: true.
+			^ self selectNextBy: 1 ].
+	key = KeyboardKey left ifTrue: [
+			anEvent consumed: true.
+			^ self goLeft ].
+	key = KeyboardKey right ifTrue: [
+			anEvent consumed: true.
+			^ self goRight ]
+]
+
 { #category : 'updating' }
 CMMonitorElement >> inUIThread: aBlock [
-	"Announcements arrive on server threads"
+	"Announcements arrive on server threads. The task runs in Bloc's UI loop:
+	an error there must not stop the loop, so it is only reported"
 
-	self enqueueTask: (BlTaskAction new action: aBlock)
+	self enqueueTask: (BlTaskAction new action: [
+				 aBlock
+					 on: Error
+					 do: [ :error | self crTrace: 'ClaudeMonitor UI: ' , error description ] ])
 ]
 
 { #category : 'initialization' }
@@ -226,6 +281,7 @@ CMMonitorElement >> initialize [
 				c horizontal matchParent.
 				c vertical matchParent ];
 		background: Color white.
+	self addEventHandlerOn: BlKeyDownEvent do: [ :event | self handleKey: event ].
 	self buildContent
 ]
 
@@ -233,6 +289,15 @@ CMMonitorElement >> initialize [
 CMMonitorElement >> isRead: anActivity [
 
 	^ CMStyle readToolNames includes: anActivity toolName
+]
+
+{ #category : 'filtering' }
+CMMonitorElement >> isShown: aRow [
+	"Not filtered out, and not inside a folded prompt"
+
+	(hideReads and: [ self isRead: aRow activity ]) ifTrue: [ ^ false ].
+	aRow activity ancestorsDo: [ :ancestor | rowsById at: ancestor id ifPresent: [ :row | row isExpanded ifFalse: [ ^ false ] ] ].
+	^ true
 ]
 
 { #category : 'accessing' }
@@ -263,13 +328,11 @@ CMMonitorElement >> maxDetailLines [
 
 { #category : 'detail' }
 CMMonitorElement >> maxLineWidth [
-	"Characters that fit in the detail pane at the current font size.
-	Before the first layout the pane has no width yet: take its share of mine"
+	"Characters that fit in the detail pane at the current font size"
 
 	| width |
-	width := detail width > 0
-		         ifTrue: [ detail width ]
-		         ifFalse: [ self width * 0.45 ].
+	width := detail parent ifNil: [ 0 ] ifNotNil: [ :scroller | scroller width ].
+	width = 0 ifTrue: [ width := self width * 0.45 ].
 	^ ((width max: 400) - 20 / CMStyle charWidth) floor max: 30
 ]
 
@@ -316,10 +379,28 @@ CMMonitorElement >> rebuild [
 	self updateHeader
 ]
 
+{ #category : 'updating' }
+CMMonitorElement >> refreshVisibility [
+
+	list children do: [ :each | (each isKindOf: CMActivityRowElement) ifTrue: [ self applyFilterTo: each ] ]
+]
+
 { #category : 'accessing' }
 CMMonitorElement >> rowCount [
 
 	^ list childrenCount
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> scrollToShow: aRow [
+	"Scroll the list just enough for the row to be fully visible"
+
+	| scroller top bottom |
+	scroller := list parent.
+	top := aRow position y + scroller scrollPosition y.
+	bottom := top + aRow height.
+	top < 0 ifTrue: [ ^ scroller scrollVerticallyBy: top negated ].
+	bottom > scroller height ifTrue: [ scroller scrollVerticallyBy: scroller height - bottom ]
 ]
 
 { #category : 'initialization' }
@@ -348,6 +429,29 @@ CMMonitorElement >> select: anActivity [
 	selected := anActivity.
 	rowsById at: anActivity id ifPresent: [ :row | row selected: true ].
 	self showDetail: anActivity
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> selectAndShow: anActivity [
+
+	self select: anActivity.
+	rowsById at: anActivity id ifPresent: [ :row | self scrollToShow: row ]
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> selectNextBy: aDelta [
+
+	| rows index |
+	rows := self visibleRows.
+	rows ifEmpty: [ ^ self ].
+	index := selected
+		         ifNil: [
+				         aDelta > 0
+					         ifTrue: [ 0 ]
+					         ifFalse: [ rows size + 1 ] ]
+		         ifNotNil: [ rows findFirst: [ :row | row activity == selected ] ].
+	index := index + aDelta min: rows size max: 1.
+	self selectAndShow: (rows at: index) activity
 ]
 
 { #category : 'accessing' }
@@ -417,6 +521,16 @@ CMMonitorElement >> showDetail: anActivity [
 			self addText: anActivity response code: true ]
 ]
 
+{ #category : 'updating' }
+CMMonitorElement >> toggle: anActivity [
+	"Fold or unfold the tool calls of a prompt"
+
+	rowsById at: anActivity id ifPresent: [ :row |
+			anActivity hasChildren ifFalse: [ ^ self ].
+			row expanded: row isExpanded not.
+			self refreshVisibility ]
+]
+
 { #category : 'filtering' }
 CMMonitorElement >> toggleHideReads: aButton [
 
@@ -424,7 +538,7 @@ CMMonitorElement >> toggleHideReads: aButton [
 	aButton background: (hideReads
 			 ifTrue: [ CMStyle selectionColor ]
 			 ifFalse: [ Color white ]).
-	list children do: [ :row | self applyFilterTo: row ]
+	self refreshVisibility
 ]
 
 { #category : 'updating' }
@@ -468,4 +582,10 @@ CMMonitorElement >> updateRowFor: anActivity [
 CMMonitorElement >> updateSessionRowFor: aSession [
 
 	self sessionRows at: aSession id ifPresent: [ :row | row update ]
+]
+
+{ #category : 'keyboard' }
+CMMonitorElement >> visibleRows [
+
+	^ list children select: [ :each | (each isKindOf: CMActivityRowElement) and: [ each visibility isVisible ] ]
 ]

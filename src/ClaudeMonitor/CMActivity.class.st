@@ -24,12 +24,41 @@ Class {
 		'startedAt',
 		'finishedAt',
 		'response',
-		'reportedDuration'
+		'reportedDuration',
+		'promptId',
+		'parent',
+		'children'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
 	#tag : 'Model'
 }
+
+{ #category : 'hierarchy' }
+CMActivity >> addChild: anActivity [
+
+	(self children includes: anActivity) ifFalse: [ self children add: anActivity ]
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> ancestorsDo: aBlock [
+
+	parent ifNotNil: [
+			aBlock value: parent.
+			parent ancestorsDo: aBlock ]
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> children [
+
+	^ children ifNil: [ children := OrderedCollection new ]
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> depth [
+
+	^ parent ifNil: [ 0 ] ifNotNil: [ parent depth + 1 ]
+]
 
 { #category : 'printing' }
 CMActivity >> durationMilliseconds [
@@ -71,6 +100,12 @@ CMActivity >> firstStatementOf: someCode [
 	^ (someCode lines collect: [ :line | line trimBoth ])
 		  detect: [ :line | line isNotEmpty and: [ (line beginsWith: '|') not and: [ (line beginsWith: '"') not ] ] ]
 		  ifNone: [ someCode trimBoth ]
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> hasChildren [
+
+	^ children isNotNil and: [ children isNotEmpty ]
 ]
 
 { #category : 'accessing' }
@@ -153,10 +188,36 @@ CMActivity >> methodSubjectFrom: aSourceOrSources in: anInput [
 			  selectors do: [ :each | s << each ] separatedBy: [ s << ', ' ] ]
 ]
 
+{ #category : 'hierarchy' }
+CMActivity >> parent [
+	"The prompt that led to this activity, nil for a prompt"
+
+	^ parent
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> parent: anActivity [
+
+	parent := anActivity.
+	anActivity ifNotNil: [ anActivity addChild: self ]
+]
+
 { #category : 'printing' }
 CMActivity >> printOn: aStream [
 
 	aStream << self shortToolName << ': ' << self summary
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> promptId [
+
+	^ promptId
+]
+
+{ #category : 'hierarchy' }
+CMActivity >> promptId: aString [
+
+	promptId := aString
 ]
 
 { #category : 'accessing' }

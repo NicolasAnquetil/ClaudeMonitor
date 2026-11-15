@@ -71,9 +71,22 @@ CMStyle class >> defaultFontSize [
 ]
 
 { #category : 'sizes' }
+CMStyle class >> disclosureWidth [
+
+	^ self fontSize
+]
+
+{ #category : 'sizes' }
 CMStyle class >> dotSize [
 
 	^ (self fontSize * 0.7) rounded
+]
+
+{ #category : 'sizes' }
+CMStyle class >> durationColumnWidth [
+	"Room for 999.9 s"
+
+	^ (self charWidth * 9) rounded
 ]
 
 { #category : 'sizes' }
@@ -100,6 +113,12 @@ CMStyle class >> heading: aString [
 	^ (self text: aString size: self fontSize + 1 color: (Color r: 0.2 g: 0.25 b: 0.45))
 		  bold;
 		  yourself
+]
+
+{ #category : 'sizes' }
+CMStyle class >> indentWidth [
+
+	^ (self fontSize * 1.4) rounded
 ]
 
 { #category : 'styles' }
@@ -160,4 +179,11 @@ CMStyle class >> text: aString size: aNumber color: aColor [
 		  fontSize: aNumber;
 		  foreground: aColor;
 		  yourself
+]
+
+{ #category : 'sizes' }
+CMStyle class >> timeColumnWidth [
+	"Room for 00:00:00 in monospace"
+
+	^ (self charWidth * 9) rounded
 ]

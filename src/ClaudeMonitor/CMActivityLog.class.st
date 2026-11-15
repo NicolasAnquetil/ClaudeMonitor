@@ -15,7 +15,9 @@ Class {
 		'mutex',
 		'transcriptReader',
 		'rawEvents',
-		'sessions'
+		'sessions',
+		'promptsById',
+		'lastPromptBySession'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -90,6 +92,12 @@ CMActivityLog >> initialize [
 	transcriptReader := CMTranscriptReader new
 ]
 
+{ #category : 'hierarchy' }
+CMActivityLog >> lastPromptBySession [
+
+	^ lastPromptBySession ifNil: [ lastPromptBySession := Dictionary new ]
+]
+
 { #category : 'accessing' }
 CMActivityLog >> maxRawEvents [
 
@@ -123,6 +131,19 @@ CMActivityLog >> noteSessionOf: aDictionary [
 	^ session
 ]
 
+{ #category : 'hierarchy' }
+CMActivityLog >> parentFor: aDictionary [
+	"The prompt activity this event belongs to: the one with its prompt_id,
+	else the last prompt of its session"
+
+	^ mutex critical: [
+			  | prompt |
+			  aDictionary at: 'prompt_id' ifPresent: [ :id | prompt := self promptsById at: id ifAbsent: [ nil ] ].
+			  prompt ifNil: [
+				  aDictionary at: 'session_id' ifPresent: [ :id | prompt := self lastPromptBySession at: id ifAbsent: [ nil ] ] ].
+			  prompt ]
+]
+
 { #category : 'hook events' }
 CMActivityLog >> promptSubmitted: aDictionary [
 
@@ -131,14 +152,22 @@ CMActivityLog >> promptSubmitted: aDictionary [
 	activity := CMActivity new
 		            id: UUID new asString;
 		            sessionId: (aDictionary at: 'session_id' ifAbsent: [ nil ]);
+		            promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
 		            kind: #prompt;
 		            input: (Dictionary with: 'prompt' -> (aDictionary at: 'prompt' ifAbsent: [ '' ]));
 		            status: #ok;
 		            startedAt: now;
 		            finishedAt: now;
 		            yourself.
+	self registerPrompt: activity.
 	self add: activity.
 	^ activity
+]
+
+{ #category : 'hierarchy' }
+CMActivityLog >> promptsById [
+
+	^ promptsById ifNil: [ promptsById := Dictionary new ]
 ]
 
 { #category : 'accessing' }
@@ -161,6 +190,14 @@ CMActivityLog >> refreshTitleOf: aSession [
 	announcer announce: (CMSessionChanged new
 			 session: aSession;
 			 yourself)
+]
+
+{ #category : 'hierarchy' }
+CMActivityLog >> registerPrompt: anActivity [
+
+	mutex critical: [
+			anActivity promptId ifNotNil: [ :id | self promptsById at: id put: anActivity ].
+			anActivity sessionId ifNotNil: [ :id | self lastPromptBySession at: id put: anActivity ] ]
 ]
 
 { #category : 'private' }
@@ -253,6 +290,8 @@ CMActivityLog >> toolStarted: aDictionary [
 				            kind: #tool;
 				            status: #running;
 				            startedAt: DateAndTime now;
+				            promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
+				            parent: (self parentFor: aDictionary);
 				            yourself ].
 	activity
 		sessionId: (aDictionary at: 'session_id' ifAbsent: [ nil ]);
