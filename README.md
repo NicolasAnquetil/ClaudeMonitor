@@ -29,6 +29,7 @@ The window shows a tree, newest on top: each Claude Code session, the prompts yo
 - the messages Claude wrote and its thinking, read from the session transcript at each hook event (the transcript keeps the text of only part of the thinking: the rest is skipped),
 - the tool calls, each under the message Claude wrote just before it (or under the prompt when there is none),
 - for a to-do list (`TodoWrite`) or a plan (`ExitPlanMode`), one row per step under the call, with its state (done, in progress, pending).
+
 Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
 
 Keys: up and down move in the list; left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call.
@@ -41,6 +42,7 @@ Select a row to see its details on the right (the text can be selected and copie
 - **Response** or **Error**: what the tool answered (cut after 20000 characters).
 
 *Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Collapse all* folds every prompt, message and plan (one row per prompt); *Clear* hides what happened until now; *A-* and *A+* change the font size.
+
 ## Claude Code hooks
 
 Put this in the workspace's `.claude/settings.json` (only sessions started in that workspace are monitored). The hooks run asynchronously and fail silently, so Claude Code is never slowed down or blocked when the image is not running.
