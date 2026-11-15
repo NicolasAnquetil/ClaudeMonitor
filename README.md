@@ -24,7 +24,12 @@ CMMonitor reset.   "stop and forget the activities"
 
 This loads Bloc v3.0.0 and Toplo v0.11.0 (the Toplo version built on that Bloc).
 
-The window shows a tree, newest on top: each Claude Code session, the prompts you submitted in it, and under each prompt the tool calls it led to. Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
+The window shows a tree, newest on top: each Claude Code session, the prompts you submitted in it, and under each prompt what Claude did for it, in order:
+
+- the tool calls,
+- the messages Claude wrote and its thinking, read from the session transcript at each hook event (the transcript keeps the text of only part of the thinking: the rest is skipped),
+- for a to-do list (`TodoWrite`) or a plan (`ExitPlanMode`), one row per step under the call, with its state (done, in progress, pending).
+Each row has a status icon (running, ok, failed), the tool, a summary, then the start time and the duration in their own columns. The arrows fold and unfold sessions and prompts.
 
 Keys: up and down move in the list; left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call.
 
@@ -53,6 +58,8 @@ Put this in the workspace's `.claude/settings.json` (only sessions started in th
     "PostToolUseFailure": [{ "matcher": "*", "hooks": [{ "type": "command", "async": true,
       "command": "curl -s -m 2 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:8091/event >/dev/null 2>&1 || true" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "async": true,
+      "command": "curl -s -m 2 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:8091/event >/dev/null 2>&1 || true" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "async": true,
       "command": "curl -s -m 2 -X POST -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:8091/event >/dev/null 2>&1 || true" }] }]
   }
 }

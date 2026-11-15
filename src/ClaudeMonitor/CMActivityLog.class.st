@@ -17,7 +17,11 @@ Class {
 		'rawEvents',
 		'sessions',
 		'promptsById',
-		'lastPromptBySession'
+		'lastPromptBySession',
+		'fileSystem',
+		'transcriptPositions',
+		'transcriptPrompts',
+		'transcriptLock'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -48,6 +52,23 @@ CMActivityLog >> add: anActivity [
 			 yourself)
 ]
 
+{ #category : 'hook events' }
+CMActivityLog >> addStepsOf: aToolActivity [
+	"A to-do list or a plan: one child activity per step, in order"
+
+	(self planStepsIn: aToolActivity input) withIndexDo: [ :step :index |
+			self add: (CMActivity new
+					 id: aToolActivity id , '#step' , index printString;
+					 sessionId: aToolActivity sessionId;
+					 kind: #step;
+					 input: step;
+					 status: #ok;
+					 startedAt: aToolActivity startedAt;
+					 finishedAt: aToolActivity startedAt;
+					 parent: aToolActivity;
+					 yourself) ]
+]
+
 { #category : 'accessing' }
 CMActivityLog >> announcer [
 
@@ -65,12 +86,47 @@ CMActivityLog >> explanationFor: aDictionary [
 	^ nil
 ]
 
+{ #category : 'transcript' }
+CMActivityLog >> fileSystem [
+	"Where transcript paths are looked up: the disk, or a memory file system in tests"
+
+	^ fileSystem ifNil: [ fileSystem := FileSystem disk ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> fileSystem: aFileSystem [
+
+	fileSystem := aFileSystem
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> followTranscriptOf: aDictionary [
+	"Add what Claude wrote in the session transcript since it was last read: messages, thinking"
+
+	| path sessionId |
+	path := aDictionary at: 'transcript_path' ifAbsent: [ ^ self ].
+	sessionId := aDictionary at: 'session_id' ifAbsent: [ ^ self ].
+	self transcriptLock critical: [
+			| result |
+			result := [
+			          transcriptReader
+				          newEntriesIn: (self fileSystem referenceTo: path)
+				          from: (self transcriptPositions at: sessionId ifAbsent: [ 0 ]) ]
+				          on: Error
+				          do: [ ^ self ].
+			self transcriptPositions at: sessionId put: result second.
+			result first do: [ :entry | self noteTranscriptEntry: entry inSession: sessionId ] ]
+]
+
 { #category : 'hook events' }
 CMActivityLog >> handleHookEvent: aDictionary [
-	"Create or complete the activity a Claude Code hook payload reports. Unknown events are ignored."
+	"Create or complete the activity a Claude Code hook payload reports. What Claude wrote in the
+	transcript since the last event comes first, so that it lands before this event's activity.
+	Stop (end of an answer) only reads the transcript. Unknown events are ignored."
 
 	self rememberRawEvent: aDictionary.
 	self noteSessionOf: aDictionary.
+	self followTranscriptOf: aDictionary.
 	aDictionary at: 'hook_event_name' ifPresent: [ :event |
 			event = 'PreToolUse' ifTrue: [ ^ self toolStarted: aDictionary ].
 			event = 'PostToolUse' ifTrue: [ ^ self tool: aDictionary finishedWith: #ok ].
@@ -131,6 +187,31 @@ CMActivityLog >> noteSessionOf: aDictionary [
 	^ session
 ]
 
+{ #category : 'transcript' }
+CMActivityLog >> noteTranscriptEntry: anEntry inSession: aSessionId [
+
+	(anEntry at: 'isSidechain' ifAbsent: [ false ]) == true ifTrue: [ ^ self ].
+	(anEntry at: 'type' ifAbsent: [ nil ]) = 'user' ifTrue: [ ^ self transcriptPrompts at: aSessionId put: (anEntry at: 'promptId') ].
+	(transcriptReader contentOf: anEntry) withIndexDo: [ :block :index |
+			| type text |
+			type := block at: 'type' ifAbsent: [ nil ].
+			text := type = 'text'
+				        ifTrue: [ block at: 'text' ifAbsent: [ nil ] ]
+				        ifFalse: [
+						        type = 'thinking'
+							        ifTrue: [ block at: 'thinking' ifAbsent: [ nil ] ]
+							        ifFalse: [ nil ] ].
+			(text isString and: [ text trimBoth notEmpty ]) ifTrue: [
+					self
+						thought: text
+						kind: (type = 'text'
+								 ifTrue: [ #message ]
+								 ifFalse: [ #thinking ])
+						id: (anEntry at: 'uuid' ifAbsent: [ UUID new asString ]) , '#' , index printString
+						at: (anEntry at: 'timestamp' ifAbsent: [ nil ])
+						inSession: aSessionId ] ]
+]
+
 { #category : 'hierarchy' }
 CMActivityLog >> parentFor: aDictionary [
 	"The prompt activity this event belongs to: the one with its prompt_id,
@@ -142,6 +223,39 @@ CMActivityLog >> parentFor: aDictionary [
 			  prompt ifNil: [
 				  aDictionary at: 'session_id' ifPresent: [ :id | prompt := self lastPromptBySession at: id ifAbsent: [ nil ] ] ].
 			  prompt ]
+]
+
+{ #category : 'hook events' }
+CMActivityLog >> planItemIn: aLine [
+	"The text of a Markdown heading or list item ('# Plan', '- step', '* step', '1. step'), else an empty string"
+
+	| line dot |
+	line := aLine trimBoth.
+	line isEmpty ifTrue: [ ^ '' ].
+	line first = $# ifTrue: [ ^ (line copyWithoutAll: '#') trimBoth ].
+	(line first = $- or: [ line first = $* ]) ifTrue: [ ^ line allButFirst trimBoth ].
+	dot := line indexOf: $..
+	(dot > 1 and: [ (line first: dot - 1) allSatisfy: [ :each | each isDigit ] ]) ifTrue: [ ^ (line allButFirst: dot) trimBoth ].
+	^ ''
+]
+
+{ #category : 'hook events' }
+CMActivityLog >> planStepsIn: anInput [
+	"The steps of a TodoWrite to-do list ('todos') or of a plan-mode plan ('plan', in Markdown:
+	its headings and list items), each as a Dictionary with 'text' (and 'state' for a to-do)"
+
+	anInput at: 'todos' ifPresent: [ :todos |
+			todos isArray ifTrue: [
+					^ (todos select: [ :each | each isDictionary ]) collect: [ :each |
+							  Dictionary new
+								  at: 'text' put: (each at: 'content' ifAbsent: [ '' ]) asString;
+								  at: 'state' put: (each at: 'status' ifAbsent: [ 'pending' ]);
+								  yourself ] ] ].
+	anInput at: 'plan' ifPresent: [ :plan |
+			plan isString ifTrue: [
+					^ (plan lines collect: [ :line | self planItemIn: line ] thenSelect: [ :text | text notEmpty ]) collect: [ :text |
+						  Dictionary with: 'text' -> text ] ] ].
+	^ #(  )
 ]
 
 { #category : 'hook events' }
@@ -252,6 +366,32 @@ CMActivityLog >> startTimeOf: aSession [
 				   do: [ nil ] ]) ifNil: [ DateAndTime now ]
 ]
 
+{ #category : 'transcript' }
+CMActivityLog >> thought: aString kind: aKind id: anId at: aTimestamp inSession: aSessionId [
+	"A message or a thinking, under its prompt. Entries of prompts written before the monitor
+	started are skipped, like their tool calls were"
+
+	| prompt time activity |
+	(self activityWithId: anId) ifNotNil: [ ^ self ].
+	prompt := (self transcriptPrompts at: aSessionId ifAbsent: [ nil ])
+		          ifNil: [ self lastPromptBySession at: aSessionId ifAbsent: [ nil ] ]
+		          ifNotNil: [ :promptId | self promptsById at: promptId ifAbsent: [ ^ self ] ].
+	time := [ (DateAndTime fromString: aTimestamp) asLocal ]
+		        on: Error
+		        do: [ DateAndTime now ].
+	activity := CMActivity new
+		            id: anId;
+		            sessionId: aSessionId;
+		            kind: aKind;
+		            input: (Dictionary with: 'text' -> aString);
+		            status: #ok;
+		            startedAt: time;
+		            finishedAt: time;
+		            parent: prompt;
+		            yourself.
+	self add: activity
+]
+
 { #category : 'sessions' }
 CMActivityLog >> titleCheckPeriod [
 
@@ -311,6 +451,7 @@ CMActivityLog >> toolStarted: aDictionary [
 			  ifFalse: [ CMActivityChanged ]) new
 			 activity: activity;
 			 yourself).
+	isNew ifTrue: [ self addStepsOf: activity ].
 	^ activity
 ]
 
@@ -318,6 +459,26 @@ CMActivityLog >> toolStarted: aDictionary [
 CMActivityLog >> toolUseIdIn: aDictionary [
 
 	^ aDictionary at: 'tool_use_id' ifAbsent: [ UUID new asString ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> transcriptLock [
+
+	^ transcriptLock ifNil: [ transcriptLock := Mutex new ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> transcriptPositions [
+	"Session id -> position in its transcript up to which it was read"
+
+	^ transcriptPositions ifNil: [ transcriptPositions := Dictionary new ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> transcriptPrompts [
+	"Session id -> id of the prompt the transcript is at"
+
+	^ transcriptPrompts ifNil: [ transcriptPrompts := Dictionary new ]
 ]
 
 { #category : 'accessing' }

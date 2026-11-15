@@ -46,9 +46,9 @@ CMToploMonitorElement class >> openOn: anActivityLog [
 
 { #category : 'tree' }
 CMToploMonitorElement >> activityAdded: anActivity [
-	"Insert the row of a new activity just below its parent, if the parent is unfolded"
+	"Insert the row of a new activity at its place among its siblings, if its parent is unfolded"
 
-	| owner ownerIndex wrapper |
+	| owner ownerIndex wrapper rowIndex |
 	(self isHidden: anActivity) ifTrue: [ ^ self updateTitle ].
 	(self indexOf: anActivity) > 0 ifTrue: [ ^ self activityChanged: anActivity ].
 	owner := (self parentOf: anActivity) ifNil: [ ^ self updateTitle ].
@@ -61,10 +61,16 @@ CMToploMonitorElement >> activityAdded: anActivity [
 			self keepSelection.
 			^ self updateTitle ].
 	wrapper := self wrapperAt: ownerIndex.
-	wrapper isExpanded ifTrue: [
-			table dataAccessor useParentWrapper: wrapper while: [ table dataAccessor add: anActivity afterIndex: ownerIndex ].
-			(anActivity isPrompt and: [ (collapsed includes: anActivity) not ]) ifTrue: [ (self wrapperAt: ownerIndex + 1) expand ].
-			self keepSelection ].
+	"The first step of a plan: show the steps, unless the user folded them"
+	(wrapper isExpanded not and: [ anActivity isStep and: [ owner children size = 1 and: [ (collapsed includes: owner) not ] ] ])
+		ifTrue: [ wrapper expand ]
+		ifFalse: [
+				wrapper isExpanded ifTrue: [
+						rowIndex := (self insertionIndexOf: anActivity under: ownerIndex) + 1.
+						table dataAccessor useParentWrapper: wrapper while: [ table dataAccessor add: anActivity afterIndex: rowIndex - 1 ].
+						((anActivity isPrompt or: [ anActivity hasChildren ]) and: [ (collapsed includes: anActivity) not ]) ifTrue: [
+							(self wrapperAt: rowIndex) expand ] ] ].
+	self keepSelection.
 	"The owner may have had no children: show its fold arrow"
 	self refreshRowAt: ownerIndex.
 	self updateTitle
@@ -178,6 +184,27 @@ CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 	aText append: (CMStyle small: aSession dateString , '   session ' , aSession id)
 ]
 
+{ #category : 'detail' }
+CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
+	"A message, a thinking or a step: its text, whole"
+
+	aText append: (CMStyle heading: (String streamContents: [ :s |
+					  s << anActivity shortToolName.
+					  anActivity stepState ifNotNil: [ :state | s << '  -  ' << (state copyReplaceAll: '_' with: ' ') ] ])).
+	self newLineIn: aText.
+	aText append: (CMStyle small: (self contextLineOf: anActivity)).
+	self
+		section: (anActivity isMessage
+				 ifTrue: [ 'Message' ]
+				 ifFalse: [
+						 anActivity isThinking
+							 ifTrue: [ 'Thinking' ]
+							 ifFalse: [ 'Step' ] ])
+		text: anActivity text
+		code: false
+		in: aText
+]
+
 { #category : 'table' }
 CMToploMonitorElement >> applyArrowTokens [
 	"Solid triangles to fold and unfold, sized with the font, instead of the theme's small chevrons"
@@ -282,14 +309,18 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 
 { #category : 'tree' }
 CMToploMonitorElement >> childrenOf: anItem [
-	"Newest first: the prompts of a session (and its tool calls made before any prompt, or under a
-	hidden prompt), the tool calls of a prompt"
+	"The steps of a plan in their order; otherwise newest first: the prompts of a session (and its
+	activities made before any prompt, or under a hidden prompt), the activities of a prompt"
 
 	| items |
 	items := (self isSession: anItem)
 		         ifTrue: [ log activities copy select: [ :each | each sessionId = anItem id and: [ (self parentOf: each) == anItem ] ] ]
 		         ifFalse: [ anItem children copy ].
-	^ (items reject: [ :each | self isHidden: each ]) reversed asArray
+	items := items reject: [ :each | self isHidden: each ].
+	(items notEmpty and: [ items first isStep ]) ifTrue: [ ^ items asArray ].
+	^ (items asArray withIndexCollect: [ :each :index | each -> index ])
+		  sort: [ :a :b | self is: a after: b ];
+		  collect: [ :each | each key ]
 ]
 
 { #category : 'updating' }
@@ -353,7 +384,7 @@ CMToploMonitorElement >> durationColumnWidth [
 CMToploMonitorElement >> durationStringOf: anActivity [
 
 	| ms |
-	anActivity isPrompt ifTrue: [ ^ '' ].
+	(anActivity isPrompt or: [ anActivity isThought or: [ anActivity isStep ] ]) ifTrue: [ ^ '' ].
 	anActivity isRunning ifTrue: [ ^ '...' ].
 	ms := anActivity durationMilliseconds ifNil: [ ^ '' ].
 	ms < 1000 ifTrue: [ ^ ms rounded printString , ' ms' ].
@@ -437,6 +468,34 @@ CMToploMonitorElement >> initialize [
 	self addChildren: {
 			self buildHeader.
 			self buildBody }
+]
+
+{ #category : 'tree' }
+CMToploMonitorElement >> insertionIndexOf: anActivity under: anOwnerIndex [
+	"Where the row of anActivity goes among its siblings: just after the owner when it comes first,
+	else just after the rows of the sibling that comes before it (with their descendants)"
+
+	| siblings position previousIndex depth index |
+	siblings := self childrenOf: (table dataAccessor unwrappedDataItemAt: anOwnerIndex).
+	position := siblings indexOf: anActivity.
+	position <= 1 ifTrue: [ ^ anOwnerIndex ].
+	previousIndex := self indexOf: (siblings at: position - 1).
+	previousIndex = 0 ifTrue: [ ^ anOwnerIndex ].
+	depth := (self wrapperAt: previousIndex) nodeDepth.
+	index := previousIndex.
+	[ index < table dataAccessor size and: [ (self wrapperAt: index + 1) nodeDepth > depth ] ] whileTrue: [ index := index + 1 ].
+	^ index
+]
+
+{ #category : 'tree' }
+CMToploMonitorElement >> is: anAssociation after: anotherAssociation [
+	"Newest first; activities with the same time keep their order of arrival, newest first"
+
+	| t1 t2 |
+	t1 := anAssociation key startedAt ifNil: [ DateAndTime epoch ].
+	t2 := anotherAssociation key startedAt ifNil: [ DateAndTime epoch ].
+	t1 = t2 ifTrue: [ ^ anAssociation value > anotherAssociation value ].
+	^ t1 > t2
 ]
 
 { #category : 'tree' }
@@ -643,7 +702,10 @@ CMToploMonitorElement >> showDetail: anItem [
 	text := '' asRopedText.
 	(self isSession: anItem)
 		ifTrue: [ self addSessionDetailOf: anItem to: text ]
-		ifFalse: [ self addActivityDetailOf: anItem to: text ].
+		ifFalse: [
+				(anItem isThought or: [ anItem isStep ])
+					ifTrue: [ self addTextDetailOf: anItem to: text ]
+					ifFalse: [ self addActivityDetailOf: anItem to: text ] ].
 	detail text: text
 ]
 
@@ -661,14 +723,29 @@ CMToploMonitorElement >> startedTextOf: anItem [
 { #category : 'table' }
 CMToploMonitorElement >> statusIconFor: anActivity [
 
-	| icon |
-	icon := ToMaterialDesignIconProvider iconNamed: (anActivity isRunning
-			         ifTrue: [ #filled_hourglassempty ]
-			         ifFalse: [
-					         anActivity isFailed
-						         ifTrue: [ #filled_error ]
-						         ifFalse: [ #filled_checkcircle ] ]).
-	icon innerImageColor: (CMStyle colorForStatus: anActivity status).
+	| name color icon |
+	name := #filled_checkcircle.
+	color := CMStyle colorForStatus: anActivity status.
+	anActivity isRunning ifTrue: [ name := #filled_hourglassempty ].
+	anActivity isFailed ifTrue: [ name := #filled_error ].
+	anActivity isMessage ifTrue: [
+			name := #filled_chatbubbleoutline.
+			color := CMStyle colorForActivity: anActivity ].
+	anActivity isThinking ifTrue: [
+			name := #filled_psychology.
+			color := CMStyle colorForActivity: anActivity ].
+	anActivity isStep ifTrue: [
+			anActivity stepState = 'in_progress' ifTrue: [
+					name := #filled_playcircle.
+					color := Color orange ].
+			anActivity stepState = 'pending' ifTrue: [
+					name := #filled_radiobuttonunchecked.
+					color := Color gray ].
+			anActivity stepState ifNil: [
+					name := #filled_listalt.
+					color := CMStyle colorForActivity: anActivity ] ].
+	icon := ToMaterialDesignIconProvider iconNamed: name.
+	icon innerImageColor: color.
 	icon extent: (CMStyle fontSize * 1.1) rounded asPoint.
 	^ icon
 ]

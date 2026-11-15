@@ -139,6 +139,13 @@ CMActivity >> isFailed [
 ]
 
 { #category : 'testing' }
+CMActivity >> isMessage [
+	"Text Claude wrote to the user, read from the transcript"
+
+	^ kind = #message
+]
+
+{ #category : 'testing' }
 CMActivity >> isPharoTool [
 	"A call to the Pharo MCP server, e.g. mcp__pharo__image_evaluate"
 
@@ -155,6 +162,26 @@ CMActivity >> isPrompt [
 CMActivity >> isRunning [
 
 	^ status = #running
+]
+
+{ #category : 'testing' }
+CMActivity >> isStep [
+	"One step of a plan or of a to-do list"
+
+	^ kind = #step
+]
+
+{ #category : 'testing' }
+CMActivity >> isThinking [
+	"Claude's reasoning, read from the transcript"
+
+	^ kind = #thinking
+]
+
+{ #category : 'testing' }
+CMActivity >> isThought [
+
+	^ self isMessage or: [ self isThinking ]
 ]
 
 { #category : 'accessing' }
@@ -256,11 +283,14 @@ CMActivity >> sessionId: aString [
 	sessionId := aString
 ]
 
-{ #category : 'printing' }
+{ #category : 'accessing' }
 CMActivity >> shortToolName [
 	"mcp__pharo__image_evaluate -> pharo image_evaluate"
 
 	self isPrompt ifTrue: [ ^ 'prompt' ].
+	self isMessage ifTrue: [ ^ 'message' ].
+	self isThinking ifTrue: [ ^ 'thinking' ].
+	self isStep ifTrue: [ ^ 'step' ].
 	toolName ifNil: [ ^ '?' ].
 	(toolName beginsWith: 'mcp__') ifFalse: [ ^ toolName ].
 	^ (toolName allButFirst: 5) copyReplaceAll: '__' with: ' '
@@ -290,11 +320,19 @@ CMActivity >> status: aSymbol [
 	status := aSymbol
 ]
 
-{ #category : 'printing' }
+{ #category : 'accessing' }
+CMActivity >> stepState [
+	"For a to-do step: 'pending', 'in_progress' or 'completed'; nil for a plan step"
+
+	^ self input at: 'state' ifAbsent: [ nil ]
+]
+
+{ #category : 'accessing' }
 CMActivity >> subject [
 	"The main argument of the call: the command, the file, the method, the code or the prompt"
 
 	| in |
+	(self isThought or: [ self isStep ]) ifTrue: [ ^ self text ].
 	in := self input.
 	self isPrompt ifTrue: [ ^ (in at: 'prompt' ifAbsent: [ '' ]) asString ].
 	in at: 'source' ifPresent: [ :source | ^ self methodSubjectFrom: source in: in ].
@@ -314,10 +352,17 @@ CMActivity >> summary [
 	text := (why isNil or: [ why isEmpty ])
 		        ifTrue: [ self subject ]
 		        ifFalse: [ why ].
-	text := text asString lines ifEmpty: [ '' ] ifNotEmpty: [ :lines | lines first ].
+	text := text asString lines detect: [ :line | line trimBoth notEmpty ] ifNone: [ '' ].
 	^ text size > 120
 		  ifTrue: [ (text first: 117) , '...' ]
 		  ifFalse: [ text ]
+]
+
+{ #category : 'accessing' }
+CMActivity >> text [
+	"The text of a message, a thinking or a step"
+
+	^ (self input at: 'text' ifAbsent: [ '' ]) asString
 ]
 
 { #category : 'accessing' }

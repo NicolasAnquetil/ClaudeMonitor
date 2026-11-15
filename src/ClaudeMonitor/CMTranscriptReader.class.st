@@ -34,6 +34,34 @@ CMTranscriptReader >> entry: anEntry hasToolUse: aToolUseId [
 				  (block at: 'type' ifAbsent: [ nil ]) = 'tool_use' and: [ (block at: 'id' ifAbsent: [ nil ]) = aToolUseId ] ] ]
 ]
 
+{ #category : 'following' }
+CMTranscriptReader >> entryOf: aLine [
+	"Only what matters, without parsing everything: a user entry gives the prompt it belongs to
+	(its result can be big), an assistant entry with text or thinking is parsed"
+
+	| start stop |
+	(aLine includesSubstring: '"type":"assistant"') ifTrue: [
+			((aLine includesSubstring: '"type":"text"') or: [ aLine includesSubstring: '"type":"thinking"' ]) ifFalse: [ ^ nil ].
+			^ [
+				  (STONJSON fromString: aLine) ifNotNil: [ :entry |
+						  entry isDictionary
+							  ifTrue: [ entry ]
+							  ifFalse: [ nil ] ] ]
+				  on: Error
+				  do: [ nil ] ].
+	(aLine includesSubstring: '"type":"user"') ifFalse: [ ^ nil ].
+	start := aLine indexOfSubCollection: '"promptId":"'.
+	start = 0 ifTrue: [ ^ nil ].
+	start := start + 12.
+	stop := aLine indexOf: $" startingAt: start.
+	stop = 0 ifTrue: [ ^ nil ].
+	^ Dictionary new
+		  at: 'type' put: 'user';
+		  at: 'promptId' put: (aLine copyFrom: start to: stop - 1);
+		  at: 'isSidechain' put: (aLine includesSubstring: '"isSidechain":true');
+		  yourself
+]
+
 { #category : 'reading' }
 CMTranscriptReader >> explanationIn: aFileReference beforeToolUse: aToolUseId [
 	"The assistant text written since the last user entry, up to the tool_use with this id
@@ -61,6 +89,25 @@ CMTranscriptReader >> join: someTexts [
 	^ text isEmpty
 		  ifTrue: [ nil ]
 		  ifFalse: [ text ]
+]
+
+{ #category : 'following' }
+CMTranscriptReader >> newEntriesIn: aFileReference from: aPosition [
+	"The entries in the complete lines written after aPosition (a line still being written is left for
+	the next read), and the position after them"
+
+	| bytes last |
+	bytes := aFileReference binaryReadStreamDo: [ :stream |
+			         stream position: (aPosition min: stream size).
+			         stream upToEnd ].
+	last := bytes lastIndexOf: 10.
+	last = 0 ifTrue: [
+			^ {
+				  #(  ).
+				  aPosition } ].
+	^ {
+		  ((bytes copyFrom: 1 to: last) utf8Decoded lines collect: [ :line | self entryOf: line ] thenSelect: [ :each | each notNil ]).
+		  (aPosition + last) }
 ]
 
 { #category : 'reading' }

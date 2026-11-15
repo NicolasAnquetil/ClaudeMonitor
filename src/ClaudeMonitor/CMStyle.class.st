@@ -43,11 +43,14 @@ CMStyle class >> code: aString [
 		  yourself
 ]
 
-{ #category : 'styles' }
+{ #category : 'colors' }
 CMStyle class >> colorForActivity: anActivity [
 
 	| tool |
 	anActivity isPrompt ifTrue: [ ^ Color r: 0.2 g: 0.3 b: 0.6 ].
+	anActivity isMessage ifTrue: [ ^ Color r: 0.25 g: 0.5 b: 0.35 ].
+	anActivity isThinking ifTrue: [ ^ Color r: 0.55 g: 0.45 b: 0.6 ].
+	anActivity isStep ifTrue: [ ^ Color r: 0.55 g: 0.5 b: 0.25 ].
 	anActivity isPharoTool ifTrue: [ ^ Color r: 0.5 g: 0.3 b: 0.65 ].
 	tool := anActivity toolName ifNil: [ '' ].
 	tool = 'Bash' ifTrue: [ ^ Color r: 0.15 g: 0.45 b: 0.7 ].
