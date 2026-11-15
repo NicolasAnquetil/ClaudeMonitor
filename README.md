@@ -49,7 +49,7 @@ Select a row to see its details on the right (the text can be selected and copie
 - **Input**: the full command, code or file content, then the other arguments.
 - **Response** or **Error**: what the tool answered (cut after 20000 characters).
 
-*New session* starts a session of your own: type its name in the field that appears, then Enter (Escape cancels). Everything that comes from then on (the new prompts, from any Claude Code session, with all that follows them) is listed under it, until you start another one. What came before stays where it was; the Claude Code session of each row is still shown in its details. Double-click one of your sessions to rename it.
+*New session* starts a session of your own: type its name in the field that appears, then Return (Escape cancels). Everything that comes from then on (the new prompts, from any Claude Code session, with all that follows them) is listed under it, until you start another one. What came before stays where it was; the Claude Code session of each row is still shown in its details. Double-click one of your sessions to rename it (Return accepts).
 
 *Hide reads* hides the calls that only look at things (Read, Grep, Glob, Pharo searches...); *Collapse all* folds every prompt, message and plan (one row per prompt); *Clear* hides what happened until now; *A-* and *A+* change the font size.
 

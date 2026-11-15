@@ -638,23 +638,18 @@ CMToploMonitorElement >> newLineIn: aText [
 
 { #category : 'user sessions' }
 CMToploMonitorElement >> newNameField [
-	"Where the user types the name of a session: Enter accepts, Escape cancels. Hidden until needed"
+	"Where the user types the name of a session: Return accepts, Escape cancels. Hidden until needed.
+	The keys are editor shortcuts, replacing the editor's own (Return would insert a line ending)"
 
 	| field |
 	field := ToTextField new.
-	field placeholderText: (CMStyle text: 'Name of the session, then Enter').
+	field placeholderText: (CMStyle text: 'Name of the session, then Return').
 	field constraintsDo: [ :c |
 			c horizontal exact: (CMStyle charWidth * 34) rounded.
 			c vertical fitContent ].
 	field
-		addShortcut: (BlShortcutWithAction new
-				 combination: BlKeyCombination builder return build;
-				 action: [ self acceptName ];
-				 yourself);
-		addShortcut: (BlShortcutWithAction new
-				 combination: BlKeyCombination builder escape build;
-				 action: [ self hideNameField ];
-				 yourself).
+		addEditorShortcut: (CMEditorShortcut combination: BlKeyCombination return action: [ self acceptName ]);
+		addEditorShortcut: (CMEditorShortcut combination: BlKeyCombination escape action: [ self hideNameField ]).
 	field visibility: BlVisibility gone.
 	^ field
 ]
