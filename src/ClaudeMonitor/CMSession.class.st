@@ -12,7 +12,8 @@ Class {
 		'startedAt',
 		'transcript',
 		'titleCheckedAt',
-		'byUser'
+		'byUser',
+		'renamed'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -23,6 +24,12 @@ Class {
 CMSession >> beByUser [
 
 	byUser := true
+]
+
+{ #category : 'testing' }
+CMSession >> beRenamed [
+
+	renamed := true
 ]
 
 { #category : 'printing' }
@@ -60,9 +67,16 @@ CMSession >> id: aString [
 
 { #category : 'testing' }
 CMSession >> isByUser [
-	"Started by the user in the monitor, rather than a Claude Code session"
+	"Started in the monitor (New session), rather than by Claude Code: it has no transcript"
 
 	^ byUser == true
+]
+
+{ #category : 'testing' }
+CMSession >> isRenamed [
+	"Its title was given by the user"
+
+	^ renamed == true
 ]
 
 { #category : 'printing' }

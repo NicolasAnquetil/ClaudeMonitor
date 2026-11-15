@@ -23,7 +23,8 @@ Class {
 		'clearedAt',
 		'reloadPending',
 		'nameField',
-		'renamedSession'
+		'renamedSession',
+		'currentButton'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -47,13 +48,13 @@ CMToploMonitorElement class >> openOn: anActivityLog [
 	^ space
 ]
 
-{ #category : 'user sessions' }
+{ #category : 'current session' }
 CMToploMonitorElement >> acceptName [
 
 	| name |
 	name := nameField text asString trimBoth.
 	name ifEmpty: [ ^ self hideNameField ].
-	renamedSession ifNil: [ log startUserSessionNamed: name ] ifNotNil: [ :session | log rename: session to: name ].
+	renamedSession ifNil: [ log startSessionNamed: name ] ifNotNil: [ :session | log rename: session to: name ].
 	self hideNameField
 ]
 
@@ -107,7 +108,7 @@ CMToploMonitorElement >> activityCellFor: anItem [
 		        yourself.
 	(self isSession: anItem) ifTrue: [
 			^ cell
-				  addChild: (CMStyle label: (CMStyle heading: anItem displayTitle));
+				  addChild: (CMStyle label: (CMStyle heading: (self sessionTitleOf: anItem)));
 				  yourself ].
 	cell addChildren: {
 			(self statusIconFor: anItem).
@@ -191,13 +192,13 @@ CMToploMonitorElement >> addActivityDetailOf: anActivity to: aText [
 
 { #category : 'details' }
 CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
+	"The same for every session: its date, whether new prompts go under it, the Claude Code sessions in it"
 
 	| claudeSessions |
 	aText append: (CMStyle heading: aSession displayTitle).
 	self newLineIn: aText.
-	aSession isByUser ifFalse: [ ^ aText append: (CMStyle small: aSession dateString , '   session ' , aSession id) ].
-	aText append: (CMStyle small: aSession dateString , '   your session' , (log currentUserSession == aSession
-				  ifTrue: [ ', current' ]
+	aText append: (CMStyle small: aSession dateString , (log currentSession == aSession
+				  ifTrue: [ '   current: new prompts go under it' ]
 				  ifFalse: [ '' ])).
 	claudeSessions := ((log activities select: [ :each | each groupId = aSession id ]) collect: [ :each | each sessionId ]) asSet
 		                  reject: [ :each | each isNil ].
@@ -205,14 +206,12 @@ CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 		section: 'Claude Code sessions'
 		text: (claudeSessions isEmpty
 				 ifTrue: [ 'None yet.' ]
-				 ifFalse: [
-						 String cr join: (claudeSessions asSortedCollection collect: [ :id |
-								  (log sessionWithId: id) ifNil: [ id ] ifNotNil: [ :s | s displayTitle , '   ' , id ] ]) ])
+				 ifFalse: [ String cr join: (claudeSessions asSortedCollection collect: [ :id | id ]) ])
 		code: false
 		in: aText.
 	self newLineIn: aText.
 	self newLineIn: aText.
-	aText append: (CMStyle small: 'Double-click the row to rename it.')
+	aText append: (CMStyle small: 'Double-click the row to rename it; Current session makes new prompts go under it.')
 ]
 
 { #category : 'detail' }
@@ -304,6 +303,8 @@ CMToploMonitorElement >> buildHeader [
 
 	title := CMStyle label: (CMStyle heading: 'ClaudeMonitor').
 	nameField := self newNameField.
+	currentButton := self button: 'Current session' tooltip: 'New prompts go under the selected session' action: [ self makeSelectedCurrent ].
+	currentButton enabled: false.
 	hideReadsButton := self button: 'Hide reads' tooltip: 'Hide the calls that only look at things' action: [ self toggleHideReads ].
 	^ BlElement new
 		  layout: (BlLinearLayout horizontal
@@ -328,6 +329,7 @@ CMToploMonitorElement >> buildHeader [
 					   yourself).
 				  nameField.
 				  (self button: 'New session' tooltip: 'List what comes from now on under a session you name' action: [ self newSession ]).
+				  currentButton.
 				  (self button: 'A-' tooltip: 'Smaller font' action: [ self changeFontSizeBy: -1 ]).
 				  (self button: 'A+' tooltip: 'Larger font' action: [ self changeFontSizeBy: 1 ]).
 				  hideReadsButton.
@@ -354,6 +356,13 @@ CMToploMonitorElement >> callsOfSession: aSession [
 	calls := IdentitySet new.
 	log activities do: [ :each | (each groupId = aSession id and: [ each call notNil ]) ifTrue: [ calls add: each call ] ].
 	^ calls
+]
+
+{ #category : 'current session' }
+CMToploMonitorElement >> canMakeCurrent: anItem [
+	"Only a session row, not already current"
+
+	^ (self isSession: anItem) and: [ log currentSession ~~ anItem ]
 ]
 
 { #category : 'updating' }
@@ -428,11 +437,11 @@ CMToploMonitorElement >> detail [
 	^ detail
 ]
 
-{ #category : 'user sessions' }
+{ #category : 'current session' }
 CMToploMonitorElement >> doubleClicked [
-	"A session of the user can be renamed"
+	"Any session can be renamed"
 
-	((self isSession: selected) and: [ selected isByUser ]) ifTrue: [ self showNameFieldFor: selected ]
+	(self isSession: selected) ifTrue: [ self showNameFieldFor: selected ]
 ]
 
 { #category : 'table' }
@@ -630,6 +639,13 @@ CMToploMonitorElement >> log: anActivityLog [
 		when: CMSessionStarted do: [ :ann | self inUIThread: [ self sessionStarted: ann session ] ] for: self
 ]
 
+{ #category : 'current session' }
+CMToploMonitorElement >> makeSelectedCurrent [
+	"New prompts go under the selected session row"
+
+	(self canMakeCurrent: selected) ifTrue: [ log makeCurrent: selected ]
+]
+
 { #category : 'detail' }
 CMToploMonitorElement >> newLineIn: aText [
 
@@ -812,7 +828,8 @@ CMToploMonitorElement >> selectionChanged: anEvent [
 	indexes ifEmpty: [ ^ self ].
 	indexes first > table dataAccessor size ifTrue: [ ^ self ].
 	selected := table dataAccessor unwrappedDataItemAt: indexes first.
-	self showDetail: selected
+	self showDetail: selected.
+	self updateCurrentButton
 ]
 
 { #category : 'tree' }
@@ -821,7 +838,8 @@ CMToploMonitorElement >> sessionChanged: aSession [
 	| index |
 	index := self indexOf: aSession.
 	index > 0 ifTrue: [ self refreshRowAt: index ].
-	selected == aSession ifTrue: [ self showDetail: aSession ]
+	selected == aSession ifTrue: [ self showDetail: aSession ].
+	self updateCurrentButton
 ]
 
 { #category : 'user sessions' }
@@ -830,7 +848,17 @@ CMToploMonitorElement >> sessionStarted: aSession [
 
 	self reload.
 	self keepSelection.
-	self updateTitle
+	self updateTitle.
+	self updateCurrentButton
+]
+
+{ #category : 'current session' }
+CMToploMonitorElement >> sessionTitleOf: aSession [
+	"Where new prompts go is marked"
+
+	^ log currentSession == aSession
+		  ifTrue: [ aSession displayTitle , '  (current)' ]
+		  ifFalse: [ aSession displayTitle ]
 ]
 
 { #category : 'tree' }
@@ -1060,6 +1088,12 @@ CMToploMonitorElement >> updateColumnTitles [
 
 	table header cellContainers do: [ :container |
 		container cell children ifNotEmpty: [ :labels | labels first text: (self titleTextOf: container column) ] ]
+]
+
+{ #category : 'current session' }
+CMToploMonitorElement >> updateCurrentButton [
+	currentButton ifNil: [ ^ self ].
+	currentButton enabled: (self canMakeCurrent: selected)
 ]
 
 { #category : 'updating' }

@@ -24,7 +24,7 @@ Class {
 		'transcriptLock',
 		'calls',
 		'callsByKey',
-		'currentUserSession'
+		'currentSession'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -109,11 +109,11 @@ CMActivityLog >> callsByKey [
 	^ callsByKey ifNil: [ callsByKey := Dictionary new ]
 ]
 
-{ #category : 'user sessions' }
-CMActivityLog >> currentUserSession [
-	"The session the user started last: new prompts are listed under it"
+{ #category : 'current session' }
+CMActivityLog >> currentSession [
+	"The session row new prompts go under, whatever their Claude Code session; nil: under their Claude Code session"
 
-	^ currentUserSession
+	^ currentSession
 ]
 
 { #category : 'private' }
@@ -159,11 +159,11 @@ CMActivityLog >> followTranscriptOf: aDictionary [
 			result first do: [ :entry | self noteTranscriptEntry: entry inSession: sessionId ] ]
 ]
 
-{ #category : 'user sessions' }
+{ #category : 'current session' }
 CMActivityLog >> group: anActivity [
-	"An activity with no parent goes under the current session of the user, if any"
+	"An activity with no parent goes under the current session, if any"
 
-	anActivity parent ifNil: [ currentUserSession ifNotNil: [ :session | anActivity groupId: session id ] ]
+	anActivity parent ifNil: [ currentSession ifNotNil: [ :session | anActivity groupId: session id ] ]
 ]
 
 { #category : 'hook events' }
@@ -208,6 +208,26 @@ CMActivityLog >> link: aKey of: aCall [
 
 	self callsByKey at: aKey put: aCall.
 	(self activityWithId: aKey) ifNotNil: [ :activity | aCall show: aKey by: activity ]
+]
+
+{ #category : 'current session' }
+CMActivityLog >> makeCurrent: aSession [
+	"From now on, new prompts go under aSession, any session row"
+
+	| previous |
+	previous := mutex critical: [
+			            | old |
+			            old := currentSession.
+			            currentSession := aSession.
+			            old ].
+	previous == aSession ifTrue: [ ^ self ].
+	{
+		previous.
+		aSession } do: [ :each |
+			each ifNotNil: [
+					announcer announce: (CMSessionChanged new
+							 session: each;
+							 yourself) ] ]
 ]
 
 { #category : 'accessing' }
@@ -378,7 +398,7 @@ CMActivityLog >> refreshTitleOf: aSession [
 
 	| newTitle |
 	aSession titleCheckedAt: DateAndTime now.
-	aSession transcript ifNil: [ ^ self ].
+	(aSession transcript isNil or: [ aSession isRenamed ]) ifTrue: [ ^ self ].
 	newTitle := [ transcriptReader titleIn: aSession transcript ]
 		            on: Error
 		            do: [ nil ].
@@ -432,10 +452,12 @@ CMActivityLog >> rememberRawEvent: aDictionary [
 			[ rawEvents size > self maxRawEvents ] whileTrue: [ rawEvents removeFirst ] ]
 ]
 
-{ #category : 'user sessions' }
+{ #category : 'current session' }
 CMActivityLog >> rename: aSession to: aString [
+	"The title given by the user is kept: it is not read again from the transcript"
 
 	aSession title: aString.
+	aSession beRenamed.
 	announcer announce: (CMSessionChanged new
 			 session: aSession;
 			 yourself)
@@ -484,18 +506,9 @@ CMActivityLog >> sizeOfToolInput: anInput [
 		  do: [ anInput printString size ]
 ]
 
-{ #category : 'sessions' }
-CMActivityLog >> startTimeOf: aSession [
-
-	^ (aSession transcript ifNotNil: [ :file |
-			   [ transcriptReader startTimeIn: file ]
-				   on: Error
-				   do: [ nil ] ]) ifNil: [ DateAndTime now ]
-]
-
-{ #category : 'user sessions' }
-CMActivityLog >> startUserSessionNamed: aString [
-	"From now on, new prompts (and tool calls without a prompt) are listed under a new session"
+{ #category : 'current session' }
+CMActivityLog >> startSessionNamed: aString [
+	"A new session, made current: new prompts (and tool calls without a prompt) go under it"
 
 	| session |
 	session := CMSession new
@@ -507,11 +520,20 @@ CMActivityLog >> startUserSessionNamed: aString [
 		           yourself.
 	mutex critical: [
 			sessions at: session id put: session.
-			currentUserSession := session ].
+			currentSession := session ].
 	announcer announce: (CMSessionStarted new
 			 session: session;
 			 yourself).
 	^ session
+]
+
+{ #category : 'sessions' }
+CMActivityLog >> startTimeOf: aSession [
+
+	^ (aSession transcript ifNotNil: [ :file |
+			   [ transcriptReader startTimeIn: file ]
+				   on: Error
+				   do: [ nil ] ]) ifNil: [ DateAndTime now ]
 ]
 
 { #category : 'transcript' }
