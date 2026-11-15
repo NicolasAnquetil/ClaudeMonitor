@@ -40,7 +40,7 @@ The tokens are the output tokens Claude wrote, read from the transcript, which g
 
 The details pane gives the tokens of the selected row and of its model call, including the input tokens it read (new, cache writes, cache reads). Calls made by subagents are not counted. The arrows fold and unfold sessions and prompts.
 
-Keys: up and down move in the list; left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call.
+Keys: up and down move from the selected row (with no row selected, down goes to the first row of the current session and up to its last one); left folds a prompt or goes to its parent; right unfolds a prompt or goes to its first tool call. The selected row stays the same while new rows arrive or the list is redrawn.
 
 Select a row to see its details on the right (the text can be selected and copied; drag the divider to resize the panes):
 

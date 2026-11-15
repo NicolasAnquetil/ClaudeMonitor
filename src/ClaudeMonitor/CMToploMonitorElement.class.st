@@ -24,7 +24,8 @@ Class {
 		'reloadPending',
 		'nameField',
 		'renamedSession',
-		'currentButton'
+		'currentButton',
+		'keepSelectionPending'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -479,6 +480,15 @@ CMToploMonitorElement >> durationStringOf: anActivity [
 	^ (ms / 1000 printShowingDecimalPlaces: 1) , ' s'
 ]
 
+{ #category : 'selection' }
+CMToploMonitorElement >> firstIndexOfCurrentSession [
+	"The row of the current session, or the top of the list"
+
+	| index |
+	index := log currentSession ifNil: [ 0 ] ifNotNil: [ :session | self indexOf: session ].
+	^ index max: 1
+]
+
 { #category : 'table' }
 CMToploMonitorElement >> fitColumns [
 	"The Activity column takes the width left by the fixed ones, the fold arrow (rows have it, not the
@@ -492,6 +502,16 @@ CMToploMonitorElement >> fitColumns [
 	(first width - width) abs < 4 ifTrue: [ ^ self ].
 	first updateWidthWith: width.
 	self inUIThread: [ self reload ]
+]
+
+{ #category : 'selection' }
+CMToploMonitorElement >> goDown [
+	"The next row, or without a selection the first row (the session row) of the current session"
+
+	| index |
+	index := self selectedIndex.
+	index = 0 ifTrue: [ ^ self selectIndex: self firstIndexOfCurrentSession ].
+	self selectIndex: index + 1
 ]
 
 { #category : 'selection' }
@@ -518,6 +538,16 @@ CMToploMonitorElement >> goRight [
 	wrapper := self wrapperAt: index.
 	wrapper isExpanded ifFalse: [ ^ wrapper expand ].
 	self selectIndex: index + 1
+]
+
+{ #category : 'selection' }
+CMToploMonitorElement >> goUp [
+	"The previous row, or without a selection the last row of the current session"
+
+	| index |
+	index := self selectedIndex.
+	index = 0 ifTrue: [ ^ self selectIndex: self lastIndexOfCurrentSession ].
+	self selectIndex: index - 1
 ]
 
 { #category : 'user sessions' }
@@ -583,6 +613,26 @@ CMToploMonitorElement >> insertionIndexOf: anActivity under: anOwnerIndex [
 	^ index
 ]
 
+{ #category : 'initialization' }
+CMToploMonitorElement >> installArrowKeys [
+	"Up and Down move from the selected row (see goUp, goDown). The list skin installs its own Up and Down, which move from Toplo's selection: they are replaced, each time the skin is installed"
+
+	| list |
+	list := table list.
+	{
+		BlKeyCombination builder arrowDown build.
+		BlKeyCombination builder arrowUp build } do: [ :each | list removeShortcutsWithCombination: each ].
+	list
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder arrowDown build;
+				 action: [ self goDown ];
+				 yourself);
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder arrowUp build;
+				 action: [ self goUp ];
+				 yourself)
+]
+
 { #category : 'tree' }
 CMToploMonitorElement >> is: anAssociation after: anotherAssociation [
 	"Newest first; activities with the same time keep their order of arrival, newest first"
@@ -607,15 +657,39 @@ CMToploMonitorElement >> isSession: anItem [
 	^ anItem isKindOf: CMSession
 ]
 
-{ #category : 'tree' }
+{ #category : 'selection' }
 CMToploMonitorElement >> keepSelection [
-	"Toplo's selection is a row index: after rows were inserted above it, select the same activity again"
+	"Toplo's selection is a row index: put it back on the row of the selected item, wherever it is now"
 
 	| index |
 	selected ifNil: [ ^ self ].
-	index := self indexOf: selected.
-	index = 0 ifTrue: [ ^ self ].
+	index := self shownIndexOf: selected.
+	index = 0 ifTrue: [ ^ table selecter selectedIndex = 0 ifFalse: [ table selecter deselectAll ] ].
 	table selecter selectedIndex = index ifFalse: [ table selecter selectOnlyIndex: index ]
+]
+
+{ #category : 'selection' }
+CMToploMonitorElement >> keepSelectionLater [
+	"After Toplo has finished updating its own selection"
+
+	keepSelectionPending == true ifTrue: [ ^ self ].
+	keepSelectionPending := true.
+	self inUIThread: [
+		keepSelectionPending := false.
+		self keepSelection ]
+]
+
+{ #category : 'selection' }
+CMToploMonitorElement >> lastIndexOfCurrentSession [
+	"The last row shown under the current session, or the bottom of the list"
+
+	| index size |
+	size := table dataAccessor size.
+	index := self firstIndexOfCurrentSession.
+	(log currentSession notNil and: [ (self indexOf: log currentSession) > 0 ]) ifFalse: [ ^ size ].
+	[ index < size and: [ (self isSession: (table dataAccessor unwrappedDataItemAt: index + 1)) not ] ] whileTrue: [
+		index := index + 1 ].
+	^ index
 ]
 
 { #category : 'accessing' }
@@ -720,6 +794,7 @@ CMToploMonitorElement >> newTable [
 				 yourself) }.
 	newTable list
 		addEventHandlerOn: ToListPrimarySelectionChangedEvent do: [ :event | self selectionChanged: event ];
+		addEventHandlerOn: BlMouseDownEvent do: [ :event | self rowPressed: event ];
 		addEventHandlerOn: BlDoubleClickEvent do: [ :event | self doubleClicked ];
 		addEventHandlerOn: ToTreeDataItemWrapperExpandedEvent
 		do: [ :event | collapsed remove: event wrapper dataItem ifAbsent: [ nil ] ];
@@ -731,7 +806,8 @@ CMToploMonitorElement >> newTable [
 		addShortcut: (BlShortcutWithAction new
 				 combination: BlKeyCombination builder arrowRight build;
 				 action: [ self goRight ];
-				 yourself).
+				 yourself);
+		addEventHandlerOn: ToInstallSkinEvent do: [ :event | self inUIThread: [ self installArrowKeys ] ].
 	^ newTable
 ]
 
@@ -774,6 +850,18 @@ CMToploMonitorElement >> reload [
 	self updateTitle
 ]
 
+{ #category : 'selection' }
+CMToploMonitorElement >> rowPressed: anEvent [
+	"The row under the mouse becomes the selected row"
+
+	| element |
+	anEvent primaryButtonPressed ifFalse: [ ^ self ].
+	element := anEvent target.
+	[ element notNil and: [ (element isKindOf: ToNodeContainer) not ] ] whileTrue: [ element := element parent ].
+	element ifNil: [ ^ self ].
+	self select: element holder dataItem
+]
+
 { #category : 'updating' }
 CMToploMonitorElement >> scheduleReload [
 	"Activities moved: show the tree again, once for a burst of moves"
@@ -799,11 +887,21 @@ CMToploMonitorElement >> section: aTitle text: aString code: isCode in: aText [
 ]
 
 { #category : 'selection' }
+CMToploMonitorElement >> select: anItem [
+	"anItem becomes the selected row: its details are shown and Toplo's selection is set on its row"
+
+	selected := anItem.
+	self keepSelection.
+	self showDetail: selected.
+	self updateCurrentButton
+]
+
+{ #category : 'selection' }
 CMToploMonitorElement >> selectIndex: anIndex [
 
 	(anIndex between: 1 and: table dataAccessor size) ifFalse: [ ^ self ].
 	table selecter scrollToDataSourcePosition: anIndex.
-	table selecter selectOnlyIndex: anIndex
+	self select: (table dataAccessor unwrappedDataItemAt: anIndex)
 ]
 
 { #category : 'accessing' }
@@ -816,20 +914,14 @@ CMToploMonitorElement >> selected [
 CMToploMonitorElement >> selectedIndex [
 
 	selected ifNil: [ ^ 0 ].
-	^ self indexOf: selected
+	^ self shownIndexOf: selected
 ]
 
-{ #category : 'events' }
+{ #category : 'selection' }
 CMToploMonitorElement >> selectionChanged: anEvent [
-	"The list may have been rebuilt since the event was sent: ignore a selection beyond it"
+	"The selected row is set by a click (rowPressed:) or the arrow keys (goUp, goDown), never from Toplo's selection: Toplo keeps it as a row index, which points to another row once rows are inserted above it. Whenever Toplo's selection changes, it is put back on the row of the selected item"
 
-	| indexes |
-	indexes := anEvent selectedIndexes.
-	indexes ifEmpty: [ ^ self ].
-	indexes first > table dataAccessor size ifTrue: [ ^ self ].
-	selected := table dataAccessor unwrappedDataItemAt: indexes first.
-	self showDetail: selected.
-	self updateCurrentButton
+	self keepSelectionLater
 ]
 
 { #category : 'tree' }
@@ -902,6 +994,19 @@ CMToploMonitorElement >> showNameFieldFor: aSessionOrNil [
 	nameField text: (CMStyle text: (aSessionOrNil ifNil: [ '' ] ifNotNil: [ :s | s displayTitle ])).
 	nameField visibility: BlVisibility visible.
 	nameField requestFocus
+]
+
+{ #category : 'selection' }
+CMToploMonitorElement >> shownIndexOf: anItem [
+	"The row of anItem, or of its closest ancestor shown (when anItem is in a folded row); 0 if none is shown"
+
+	| item index |
+	item := anItem.
+	[ item notNil ] whileTrue: [
+			index := self indexOf: item.
+			index > 0 ifTrue: [ ^ index ].
+			item := self parentOf: item ].
+	^ 0
 ]
 
 { #category : 'table' }
