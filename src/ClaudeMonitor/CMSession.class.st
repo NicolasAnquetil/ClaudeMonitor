@@ -11,12 +11,19 @@ Class {
 		'title',
 		'startedAt',
 		'transcript',
-		'titleCheckedAt'
+		'titleCheckedAt',
+		'byUser'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
 	#tag : 'Model'
 }
+
+{ #category : 'testing' }
+CMSession >> beByUser [
+
+	byUser := true
+]
 
 { #category : 'printing' }
 CMSession >> dateString [
@@ -49,6 +56,13 @@ CMSession >> id [
 CMSession >> id: aString [
 
 	id := aString
+]
+
+{ #category : 'testing' }
+CMSession >> isByUser [
+	"Started by the user in the monitor, rather than a Claude Code session"
+
+	^ byUser == true
 ]
 
 { #category : 'printing' }

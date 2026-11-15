@@ -23,7 +23,8 @@ Class {
 		'transcriptPrompts',
 		'transcriptLock',
 		'calls',
-		'callsByKey'
+		'callsByKey',
+		'currentUserSession'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -45,6 +46,7 @@ CMActivityLog >> activityWithId: aString [
 
 { #category : 'private' }
 CMActivityLog >> add: anActivity [
+	self group: anActivity.
 
 	mutex critical: [
 			activities add: anActivity.
@@ -107,6 +109,13 @@ CMActivityLog >> callsByKey [
 	^ callsByKey ifNil: [ callsByKey := Dictionary new ]
 ]
 
+{ #category : 'user sessions' }
+CMActivityLog >> currentUserSession [
+	"The session the user started last: new prompts are listed under it"
+
+	^ currentUserSession
+]
+
 { #category : 'private' }
 CMActivityLog >> explanationFor: aDictionary [
 	"What Claude wrote before this call; nil when the transcript cannot be read"
@@ -148,6 +157,13 @@ CMActivityLog >> followTranscriptOf: aDictionary [
 				          do: [ ^ self ].
 			self transcriptPositions at: sessionId put: result second.
 			result first do: [ :entry | self noteTranscriptEntry: entry inSession: sessionId ] ]
+]
+
+{ #category : 'user sessions' }
+CMActivityLog >> group: anActivity [
+	"An activity with no parent goes under the current session of the user, if any"
+
+	anActivity parent ifNil: [ currentUserSession ifNotNil: [ :session | anActivity groupId: session id ] ]
 ]
 
 { #category : 'hook events' }
@@ -416,6 +432,15 @@ CMActivityLog >> rememberRawEvent: aDictionary [
 			[ rawEvents size > self maxRawEvents ] whileTrue: [ rawEvents removeFirst ] ]
 ]
 
+{ #category : 'user sessions' }
+CMActivityLog >> rename: aSession to: aString [
+
+	aSession title: aString.
+	announcer announce: (CMSessionChanged new
+			 session: aSession;
+			 yourself)
+]
+
 { #category : 'private' }
 CMActivityLog >> responseTextIn: aDictionary [
 
@@ -466,6 +491,27 @@ CMActivityLog >> startTimeOf: aSession [
 			   [ transcriptReader startTimeIn: file ]
 				   on: Error
 				   do: [ nil ] ]) ifNil: [ DateAndTime now ]
+]
+
+{ #category : 'user sessions' }
+CMActivityLog >> startUserSessionNamed: aString [
+	"From now on, new prompts (and tool calls without a prompt) are listed under a new session"
+
+	| session |
+	session := CMSession new
+		           id: 'user-' , UUID new asString;
+		           title: aString;
+		           startedAt: DateAndTime now;
+		           titleCheckedAt: DateAndTime now;
+		           beByUser;
+		           yourself.
+	mutex critical: [
+			sessions at: session id put: session.
+			currentUserSession := session ].
+	announcer announce: (CMSessionStarted new
+			 session: session;
+			 yourself).
+	^ session
 ]
 
 { #category : 'transcript' }
@@ -555,6 +601,7 @@ CMActivityLog >> toolStarted: aDictionary [
 						                       promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
 						                       parent: (self ownerOfToolFor: aDictionary);
 						                       yourself.
+					            self group: created.
 					            activities add: created.
 					            byId at: id put: created.
 					            created ] ].

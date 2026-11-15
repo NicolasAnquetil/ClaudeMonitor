@@ -21,7 +21,9 @@ Class {
 		'hideReads',
 		'collapsed',
 		'clearedAt',
-		'reloadPending'
+		'reloadPending',
+		'nameField',
+		'renamedSession'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -43,6 +45,16 @@ CMToploMonitorElement class >> openOn: anActivityLog [
 	space addEventHandlerOn: BlSpaceClosedEvent do: [ :event | element detach ].
 	space show.
 	^ space
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> acceptName [
+
+	| name |
+	name := nameField text asString trimBoth.
+	name ifEmpty: [ ^ self hideNameField ].
+	renamedSession ifNil: [ log startUserSessionNamed: name ] ifNotNil: [ :session | log rename: session to: name ].
+	self hideNameField
 ]
 
 { #category : 'tree' }
@@ -177,12 +189,30 @@ CMToploMonitorElement >> addActivityDetailOf: anActivity to: aText [
 				in: aText ]
 ]
 
-{ #category : 'detail' }
+{ #category : 'details' }
 CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 
+	| claudeSessions |
 	aText append: (CMStyle heading: aSession displayTitle).
 	self newLineIn: aText.
-	aText append: (CMStyle small: aSession dateString , '   session ' , aSession id)
+	aSession isByUser ifFalse: [ ^ aText append: (CMStyle small: aSession dateString , '   session ' , aSession id) ].
+	aText append: (CMStyle small: aSession dateString , '   your session' , (log currentUserSession == aSession
+				  ifTrue: [ ', current' ]
+				  ifFalse: [ '' ])).
+	claudeSessions := ((log activities select: [ :each | each groupId = aSession id ]) collect: [ :each | each sessionId ]) asSet
+		                  reject: [ :each | each isNil ].
+	self
+		section: 'Claude Code sessions'
+		text: (claudeSessions isEmpty
+				 ifTrue: [ 'None yet.' ]
+				 ifFalse: [
+						 String cr join: (claudeSessions asSortedCollection collect: [ :id |
+								  (log sessionWithId: id) ifNil: [ id ] ifNotNil: [ :s | s displayTitle , '   ' , id ] ]) ])
+		code: false
+		in: aText.
+	self newLineIn: aText.
+	self newLineIn: aText.
+	aText append: (CMStyle small: 'Double-click the row to rename it.')
 ]
 
 { #category : 'detail' }
@@ -273,6 +303,7 @@ CMToploMonitorElement >> buildBody [
 CMToploMonitorElement >> buildHeader [
 
 	title := CMStyle label: (CMStyle heading: 'ClaudeMonitor').
+	nameField := self newNameField.
 	hideReadsButton := self button: 'Hide reads' tooltip: 'Hide the calls that only look at things' action: [ self toggleHideReads ].
 	^ BlElement new
 		  layout: (BlLinearLayout horizontal
@@ -295,6 +326,8 @@ CMToploMonitorElement >> buildHeader [
 							   c horizontal matchParent.
 							   c vertical exact: 1 ];
 					   yourself).
+				  nameField.
+				  (self button: 'New session' tooltip: 'List what comes from now on under a session you name' action: [ self newSession ]).
 				  (self button: 'A-' tooltip: 'Smaller font' action: [ self changeFontSizeBy: -1 ]).
 				  (self button: 'A+' tooltip: 'Larger font' action: [ self changeFontSizeBy: 1 ]).
 				  hideReadsButton.
@@ -319,7 +352,7 @@ CMToploMonitorElement >> callsOfSession: aSession [
 
 	| calls |
 	calls := IdentitySet new.
-	log activities do: [ :each | (each sessionId = aSession id and: [ each call notNil ]) ifTrue: [ calls add: each call ] ].
+	log activities do: [ :each | (each groupId = aSession id and: [ each call notNil ]) ifTrue: [ calls add: each call ] ].
 	^ calls
 ]
 
@@ -343,7 +376,7 @@ CMToploMonitorElement >> childrenOf: anItem [
 
 	| items |
 	items := (self isSession: anItem)
-		         ifTrue: [ log activities copy select: [ :each | each sessionId = anItem id and: [ (self parentOf: each) == anItem ] ] ]
+		         ifTrue: [ log activities copy select: [ :each | each groupId = anItem id and: [ (self parentOf: each) == anItem ] ] ]
 		         ifFalse: [ anItem children copy ].
 	items := items reject: [ :each | self isHidden: each ].
 	(items notEmpty and: [ items first isStep ]) ifTrue: [ ^ items asArray ].
@@ -393,6 +426,13 @@ CMToploMonitorElement >> detach [
 CMToploMonitorElement >> detail [
 
 	^ detail
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> doubleClicked [
+	"A session of the user can be renamed"
+
+	((self isSession: selected) and: [ selected isByUser ]) ifTrue: [ self showNameFieldFor: selected ]
 ]
 
 { #category : 'table' }
@@ -469,6 +509,14 @@ CMToploMonitorElement >> goRight [
 	wrapper := self wrapperAt: index.
 	wrapper isExpanded ifFalse: [ ^ wrapper expand ].
 	self selectIndex: index + 1
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> hideNameField [
+
+	renamedSession := nil.
+	nameField visibility: BlVisibility gone.
+	table list requestFocus
 ]
 
 { #category : 'updating' }
@@ -578,13 +626,43 @@ CMToploMonitorElement >> log: anActivityLog [
 		when: CMActivityAdded do: [ :ann | self inUIThread: [ self activityAdded: ann activity ] ] for: self;
 		when: CMActivityChanged do: [ :ann | self inUIThread: [ self activityChanged: ann activity ] ] for: self;
 		when: CMSessionChanged do: [ :ann | self inUIThread: [ self sessionChanged: ann session ] ] for: self;
-		when: CMActivitiesRegrouped do: [ :ann | self scheduleReload ] for: self
+		when: CMActivitiesRegrouped do: [ :ann | self scheduleReload ] for: self;
+		when: CMSessionStarted do: [ :ann | self inUIThread: [ self sessionStarted: ann session ] ] for: self
 ]
 
 { #category : 'detail' }
 CMToploMonitorElement >> newLineIn: aText [
 
 	aText append: (CMStyle text: String cr)
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> newNameField [
+	"Where the user types the name of a session: Enter accepts, Escape cancels. Hidden until needed"
+
+	| field |
+	field := ToTextField new.
+	field placeholderText: (CMStyle text: 'Name of the session, then Enter').
+	field constraintsDo: [ :c |
+			c horizontal exact: (CMStyle charWidth * 34) rounded.
+			c vertical fitContent ].
+	field
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder return build;
+				 action: [ self acceptName ];
+				 yourself);
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder escape build;
+				 action: [ self hideNameField ];
+				 yourself).
+	field visibility: BlVisibility gone.
+	^ field
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> newSession [
+
+	self showNameFieldFor: nil
 ]
 
 { #category : 'initialization' }
@@ -631,6 +709,7 @@ CMToploMonitorElement >> newTable [
 				 yourself) }.
 	newTable list
 		addEventHandlerOn: ToListPrimarySelectionChangedEvent do: [ :event | self selectionChanged: event ];
+		addEventHandlerOn: BlDoubleClickEvent do: [ :event | self doubleClicked ];
 		addEventHandlerOn: ToTreeDataItemWrapperExpandedEvent
 		do: [ :event | collapsed remove: event wrapper dataItem ifAbsent: [ nil ] ];
 		addEventHandlerOn: ToTreeDataItemWrapperCollapsedEvent do: [ :event | collapsed add: event wrapper dataItem ];
@@ -647,10 +726,10 @@ CMToploMonitorElement >> newTable [
 
 { #category : 'tree' }
 CMToploMonitorElement >> parentOf: anActivity [
-	"Its prompt, or its session when there is no prompt or when the prompt is hidden (cleared)"
+	"Its prompt, or its session row (a session the user started, else its Claude Code session) when there is no prompt or when the prompt is hidden (cleared)"
 
 	(anActivity parent notNil and: [ (self isHidden: anActivity parent) not ]) ifTrue: [ ^ anActivity parent ].
-	^ log sessionWithId: anActivity sessionId
+	^ log sessionWithId: anActivity groupId
 ]
 
 { #category : 'detail' }
@@ -746,14 +825,26 @@ CMToploMonitorElement >> sessionChanged: aSession [
 
 	| index |
 	index := self indexOf: aSession.
-	index > 0 ifTrue: [ self refreshRowAt: index ]
+	index > 0 ifTrue: [ self refreshRowAt: index ].
+	selected == aSession ifTrue: [ self showDetail: aSession ]
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> sessionStarted: aSession [
+	"Its row goes on top, empty for now"
+
+	self reload.
+	self keepSelection.
+	self updateTitle
 ]
 
 { #category : 'tree' }
 CMToploMonitorElement >> sessions [
-	"Newest first"
+	"Newest first. A Claude Code session whose activities all went under sessions of the user is left out"
 
-	^ log sessions values asSortedCollection: [ :a :b |
+	| groups |
+	groups := (log activities collect: [ :each | each groupId ]) asSet.
+	^ (log sessions values select: [ :each | each isByUser or: [ groups includes: each id ] ]) asSortedCollection: [ :a :b |
 		  (a startedAt ifNil: [ DateAndTime epoch ]) >= (b startedAt ifNil: [ DateAndTime epoch ]) ]
 ]
 
@@ -778,6 +869,16 @@ CMToploMonitorElement >> showDetail: anItem [
 					ifFalse: [ self addActivityDetailOf: anItem to: text ] ].
 	self addTokensDetailOf: anItem to: text.
 	detail text: text
+]
+
+{ #category : 'user sessions' }
+CMToploMonitorElement >> showNameFieldFor: aSessionOrNil [
+	"Ask the name of a new session, or the new name of aSessionOrNil"
+
+	renamedSession := aSessionOrNil.
+	nameField text: (CMStyle text: (aSessionOrNil ifNil: [ '' ] ifNotNil: [ :s | s displayTitle ])).
+	nameField visibility: BlVisibility visible.
+	nameField requestFocus
 ]
 
 { #category : 'table' }

@@ -28,7 +28,8 @@ Class {
 		'promptId',
 		'parent',
 		'children',
-		'call'
+		'call',
+		'groupId'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -124,6 +125,19 @@ CMActivity >> firstStatementOf: someCode [
 	^ (someCode lines collect: [ :line | line trimBoth ])
 		  detect: [ :line | line isNotEmpty and: [ (line beginsWith: '|') not and: [ (line beginsWith: '"') not ] ] ]
 		  ifNone: [ someCode trimBoth ]
+]
+
+{ #category : 'accessing' }
+CMActivity >> groupId [
+	"The id of the session row I am listed under: a session the user started, else my Claude Code session"
+
+	^ groupId ifNil: [ sessionId ]
+]
+
+{ #category : 'accessing' }
+CMActivity >> groupId: aString [
+
+	groupId := aString
 ]
 
 { #category : 'hierarchy' }
