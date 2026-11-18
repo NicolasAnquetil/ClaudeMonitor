@@ -276,14 +276,16 @@ CMToploMonitorElement >> applyArrowTokens [
 
 { #category : 'updating' }
 CMToploMonitorElement >> applyFieldFonts [
-	"The text fields in our font size, not the theme's: typed text takes the font-size token, the placeholder its own text"
+	"The text fields in our font size, not the theme's: typed text takes the font-size token, the placeholder its own text.
+	A window opened before the filter existed has no filter field"
 
 	{
 		(filterField -> 'Text to look for').
 		(nameField -> 'Name of the session, then Return') } do: [ :each |
-			each key addTokenNamed: #'font-size' withValue: CMStyle fontSize.
-			each key placeholderText: (CMStyle text: each value).
-			each key requestNewSkin ]
+			each key ifNotNil: [ :field |
+					field addTokenNamed: #'font-size' withValue: CMStyle fontSize.
+					field placeholderText: (CMStyle text: each value).
+					field requestNewSkin ] ]
 ]
 
 { #category : 'table' }
@@ -565,11 +567,18 @@ CMToploMonitorElement >> filterKinds [
 ]
 
 { #category : 'filtering' }
+CMToploMonitorElement >> filterText [
+	"Empty in a window opened before the filter existed"
+
+	^ filterText ifNil: [ filterText := '' ]
+]
+
+{ #category : 'filtering' }
 CMToploMonitorElement >> filterTextChanged [
 
 	| text |
 	text := filterField text asString trimBoth.
-	text = filterText ifTrue: [ ^ self ].
+	text = self filterText ifTrue: [ ^ self ].
 	filterText := text.
 	self scheduleReload
 ]
@@ -754,7 +763,7 @@ CMToploMonitorElement >> isFilteredOut: anItem [
 { #category : 'filtering' }
 CMToploMonitorElement >> isFiltering [
 
-	^ filterText notEmpty or: [ shownKinds size < self filterKinds size ]
+	^ self filterText notEmpty or: [ self shownKinds size < self filterKinds size ]
 ]
 
 { #category : 'tree' }
@@ -799,7 +808,7 @@ CMToploMonitorElement >> kindCheckbox: aKind label: aString [
 	checkbox := ToCheckbox new.
 	^ checkbox
 		  labelText: (CMStyle button: aString);
-		  checked: (shownKinds includes: aKind);
+		  checked: (self shownKinds includes: aKind);
 		  checkAction: [ self show: aKind checked: checkbox isChecked ];
 		  yourself
 ]
@@ -849,7 +858,8 @@ CMToploMonitorElement >> makeSelectedCurrent [
 CMToploMonitorElement >> matchesFilter: anActivity [
 	"Its type is shown and it contains the text of the filter"
 
-	^ (shownKinds includes: anActivity filterKind) and: [ filterText isEmpty or: [ anActivity contentMatches: filterText ] ]
+	^ (self shownKinds includes: anActivity filterKind) and: [
+		  self filterText isEmpty or: [ anActivity contentMatches: self filterText ] ]
 ]
 
 { #category : 'detail' }
@@ -1107,8 +1117,8 @@ CMToploMonitorElement >> shortCount: aNumber [
 CMToploMonitorElement >> show: aKind checked: aBoolean [
 
 	aBoolean
-		ifTrue: [ shownKinds add: aKind ]
-		ifFalse: [ shownKinds remove: aKind ifAbsent: [ nil ] ].
+		ifTrue: [ self shownKinds add: aKind ]
+		ifFalse: [ self shownKinds remove: aKind ifAbsent: [ nil ] ].
 	self scheduleReload
 ]
 
@@ -1148,6 +1158,13 @@ CMToploMonitorElement >> shownIndexOf: anItem [
 			index > 0 ifTrue: [ ^ index ].
 			item := self parentOf: item ].
 	^ 0
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> shownKinds [
+	"All of them in a window opened before the filter existed"
+
+	^ shownKinds ifNil: [ shownKinds := self filterKinds asSet ]
 ]
 
 { #category : 'table' }
