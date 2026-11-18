@@ -25,7 +25,10 @@ Class {
 		'nameField',
 		'renamedSession',
 		'currentButton',
-		'keepSelectionPending'
+		'keepSelectionPending',
+		'filterText',
+		'shownKinds',
+		'filterField'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -61,10 +64,14 @@ CMToploMonitorElement >> acceptName [
 
 { #category : 'tree' }
 CMToploMonitorElement >> activityAdded: anActivity [
-	"Insert the row of a new activity at its place among its siblings, if its parent is unfolded"
+	"Insert the row of a new activity at its place among its siblings, if its parent is unfolded.
+	While filtering, a match may bring back parents that were left out: show the tree again"
 
 	| owner ownerIndex wrapper rowIndex |
 	(self isHidden: anActivity) ifTrue: [ ^ self updateTitle ].
+	self isFiltering ifTrue: [
+			(self matchesFilter: anActivity) ifTrue: [ self scheduleReload ].
+			^ self updateTitle ].
 	(self indexOf: anActivity) > 0 ifTrue: [ ^ self activityChanged: anActivity ].
 	owner := (self parentOf: anActivity) ifNil: [ ^ self updateTitle ].
 	ownerIndex := self indexOf: owner.
@@ -83,8 +90,8 @@ CMToploMonitorElement >> activityAdded: anActivity [
 				wrapper isExpanded ifTrue: [
 						rowIndex := (self insertionIndexOf: anActivity under: ownerIndex) + 1.
 						table dataAccessor useParentWrapper: wrapper while: [ table dataAccessor add: anActivity afterIndex: rowIndex - 1 ].
-						((anActivity isPrompt or: [ anActivity isMessage or: [ anActivity hasChildren ] ]) and: [ (collapsed includes: anActivity) not ]) ifTrue: [
-							(self wrapperAt: rowIndex) expand ] ] ].
+						((anActivity isPrompt or: [ anActivity isMessage or: [ anActivity hasChildren ] ]) and: [
+							 (collapsed includes: anActivity) not ]) ifTrue: [ (self wrapperAt: rowIndex) expand ] ] ].
 	self keepSelection.
 	"The owner may have had no children: show its fold arrow"
 	self refreshRowAt: ownerIndex.
@@ -133,10 +140,13 @@ CMToploMonitorElement >> activityCellFor: anItem [
 
 { #category : 'tree' }
 CMToploMonitorElement >> activityChanged: anActivity [
+	"While filtering, an activity that was left out may match now: show the tree again"
 
 	| index |
 	index := self indexOf: anActivity.
 	index > 0 ifTrue: [ self refreshRowAt: index ].
+	(index = 0 and: [ self isFiltering and: [ (self isHidden: anActivity) not and: [ self matchesFilter: anActivity ] ] ]) ifTrue: [
+		self scheduleReload ].
 	selected == anActivity ifTrue: [ self showDetail: anActivity ].
 	self updateTitle
 ]
@@ -264,6 +274,18 @@ CMToploMonitorElement >> applyArrowTokens [
 		addTokenNamed: #'iconic-arrow-breadth' withValue: self arrowBreadth
 ]
 
+{ #category : 'updating' }
+CMToploMonitorElement >> applyFieldFonts [
+	"The text fields in our font size, not the theme's: typed text takes the font-size token, the placeholder its own text"
+
+	{
+		(filterField -> 'Text to look for').
+		(nameField -> 'Name of the session, then Return') } do: [ :each |
+			each key addTokenNamed: #'font-size' withValue: CMStyle fontSize.
+			each key placeholderText: (CMStyle text: each value).
+			each key requestNewSkin ]
+]
+
 { #category : 'table' }
 CMToploMonitorElement >> arrowBreadth [
 
@@ -297,6 +319,48 @@ CMToploMonitorElement >> buildBody [
 			detail }.
 	pane addDividers.
 	^ pane
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> buildFilterBar [
+	"Which types of entries to show, and a text they must contain. Escape empties the text"
+
+	filterField := ToTextField new.
+	filterField placeholderText: (CMStyle text: 'Text to look for').
+	filterField constraintsDo: [ :c |
+			c horizontal exact: (CMStyle charWidth * 34) rounded.
+			c vertical fitContent ].
+	filterField whenTextEditedDo: [ :event | self filterTextChanged ].
+	filterField whenTextReplacedDo: [ :event | self filterTextChanged ].
+	filterField addEditorShortcut: (CMEditorShortcut combination: BlKeyCombination escape action: [ self clearFilterText ]).
+	^ BlElement new
+		  layout: (BlLinearLayout horizontal
+				   alignCenterLeft;
+				   interspace: 8;
+				   yourself);
+		  constraintsDo: [ :c |
+				  c horizontal matchParent.
+				  c vertical fitContent ];
+		  padding: (BlInsets
+				   top: 2
+				   left: 10
+				   bottom: 4
+				   right: 10);
+		  background: (Color r: 0.94 g: 0.94 b: 0.96);
+		  addChildren: {
+				  (CMStyle label: (CMStyle button: 'Show:')).
+				  (self kindCheckbox: #prompt label: 'Prompts').
+				  (self kindCheckbox: #thinking label: 'Thinking').
+				  (self kindCheckbox: #message label: 'Messages').
+				  (self kindCheckbox: #tool label: 'Tools').
+				  (BlElement new
+					   constraintsDo: [ :c |
+							   c horizontal exact: 16.
+							   c vertical exact: 1 ];
+					   yourself).
+				  (CMStyle label: (CMStyle button: 'Containing:')).
+				  filterField };
+		  yourself
 ]
 
 { #category : 'initialization' }
@@ -377,6 +441,7 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 	CMStyle fontSize: CMStyle fontSize + aNumber.
 	title text: (CMStyle heading: title text asString).
 	self applyArrowTokens.
+	self applyFieldFonts.
 	self updateColumnTitles.
 	self updateButtons.
 	self reload.
@@ -386,13 +451,14 @@ CMToploMonitorElement >> changeFontSizeBy: aNumber [
 { #category : 'tree' }
 CMToploMonitorElement >> childrenOf: anItem [
 	"The steps of a plan in their order; otherwise newest first: the prompts of a session (and its
-	activities made before any prompt, or under a hidden prompt), the activities of a prompt"
+	activities made before any prompt, or under a hidden prompt), the activities of a prompt.
+	What the filter leaves out is not there"
 
 	| items |
 	items := (self isSession: anItem)
 		         ifTrue: [ log activities copy select: [ :each | each groupId = anItem id and: [ (self parentOf: each) == anItem ] ] ]
 		         ifFalse: [ anItem children copy ].
-	items := items reject: [ :each | self isHidden: each ].
+	items := items reject: [ :each | (self isHidden: each) or: [ self isFilteredOut: each ] ].
 	(items notEmpty and: [ items first isStep ]) ifTrue: [ ^ items asArray ].
 	^ (items asArray withIndexCollect: [ :each :index | each -> index ])
 		  sort: [ :a :b | self is: a after: b ];
@@ -407,6 +473,13 @@ CMToploMonitorElement >> clear [
 	selected := nil.
 	detail text: '' asRopedText.
 	self reload
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> clearFilterText [
+
+	filterField text: '' asRopedText.
+	self filterTextChanged
 ]
 
 { #category : 'updating' }
@@ -482,6 +555,23 @@ CMToploMonitorElement >> durationStringOf: anActivity [
 	ms := anActivity durationMilliseconds ifNil: [ ^ '' ].
 	ms < 1000 ifTrue: [ ^ ms rounded printString , ' ms' ].
 	^ (ms / 1000 printShowingDecimalPlaces: 1) , ' s'
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> filterKinds [
+	"The types of entries the user can show or hide"
+
+	^ #( #prompt #thinking #message #tool )
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> filterTextChanged [
+
+	| text |
+	text := filterField text asString trimBoth.
+	text = filterText ifTrue: [ ^ self ].
+	filterText := text.
+	self scheduleReload
 ]
 
 { #category : 'selection' }
@@ -589,6 +679,8 @@ CMToploMonitorElement >> initialize [
 	super initialize.
 	hideReads := false.
 	collapsed := IdentitySet new.
+	filterText := ''.
+	shownKinds := self filterKinds asSet.
 	self
 		layout: BlLinearLayout vertical;
 		constraintsDo: [ :c |
@@ -597,7 +689,9 @@ CMToploMonitorElement >> initialize [
 		background: Color white.
 	self addChildren: {
 			self buildHeader.
-			self buildBody }
+			self buildFilterBar.
+			self buildBody }.
+	self applyFieldFonts
 ]
 
 { #category : 'tree' }
@@ -648,6 +742,21 @@ CMToploMonitorElement >> is: anAssociation after: anotherAssociation [
 	^ t1 > t2
 ]
 
+{ #category : 'filtering' }
+CMToploMonitorElement >> isFilteredOut: anItem [
+	"Neither it nor anything under it matches the filter. The parents of what matches stay, to show where it is"
+
+	self isFiltering ifFalse: [ ^ false ].
+	((self isSession: anItem) not and: [ self matchesFilter: anItem ]) ifTrue: [ ^ false ].
+	^ (self childrenOf: anItem) isEmpty
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> isFiltering [
+
+	^ filterText notEmpty or: [ shownKinds size < self filterKinds size ]
+]
+
 { #category : 'tree' }
 CMToploMonitorElement >> isHidden: anActivity [
 
@@ -681,6 +790,18 @@ CMToploMonitorElement >> keepSelectionLater [
 	self inUIThread: [
 		keepSelectionPending := false.
 		self keepSelection ]
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> kindCheckbox: aKind label: aString [
+
+	| checkbox |
+	checkbox := ToCheckbox new.
+	^ checkbox
+		  labelText: (CMStyle button: aString);
+		  checked: (shownKinds includes: aKind);
+		  checkAction: [ self show: aKind checked: checkbox isChecked ];
+		  yourself
 ]
 
 { #category : 'selection' }
@@ -722,6 +843,13 @@ CMToploMonitorElement >> makeSelectedCurrent [
 	"New prompts go under the selected session row"
 
 	(self canMakeCurrent: selected) ifTrue: [ log makeCurrent: selected ]
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> matchesFilter: anActivity [
+	"Its type is shown and it contains the text of the filter"
+
+	^ (shownKinds includes: anActivity filterKind) and: [ filterText isEmpty or: [ anActivity contentMatches: filterText ] ]
 ]
 
 { #category : 'detail' }
@@ -844,7 +972,7 @@ CMToploMonitorElement >> reload [
 
 	| index |
 	table dataAccessor removeAll.
-	self sessions do: [ :each | table dataAccessor add: each ].
+	self sessions do: [ :each | (self isFilteredOut: each) ifFalse: [ table dataAccessor add: each ] ].
 	index := 1.
 	[ index <= table dataAccessor size ] whileTrue: [
 			| wrapper |
@@ -973,6 +1101,15 @@ CMToploMonitorElement >> shortCount: aNumber [
 	aNumber < 1000 ifTrue: [ ^ aNumber rounded printString ].
 	aNumber < 1000000 ifTrue: [ ^ (aNumber / 1000 printShowingDecimalPlaces: 1) , 'k' ].
 	^ (aNumber / 1000000 printShowingDecimalPlaces: 1) , 'M'
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> show: aKind checked: aBoolean [
+
+	aBoolean
+		ifTrue: [ shownKinds add: aKind ]
+		ifFalse: [ shownKinds remove: aKind ifAbsent: [ nil ] ].
+	self scheduleReload
 ]
 
 { #category : 'detail' }
@@ -1209,11 +1346,12 @@ CMToploMonitorElement >> updateCurrentButton [
 CMToploMonitorElement >> updateTitle [
 
 	| shown running failed |
-	shown := log activities reject: [ :each | self isHidden: each ].
+	shown := log activities reject: [ :each | (self isHidden: each) or: [ self isFiltering and: [ (self matchesFilter: each) not ] ] ].
 	running := shown count: [ :each | each isRunning ].
 	failed := shown count: [ :each | each isFailed ].
 	title text: (CMStyle heading: (String streamContents: [ :s |
 					  s << 'ClaudeMonitor  -  ' << shown size printString << ' activities'.
+					  self isFiltering ifTrue: [ s << ' matching' ].
 					  running > 0 ifTrue: [ s << ', ' << running printString << ' running' ].
 					  failed > 0 ifTrue: [ s << ', ' << failed printString << ' failed' ] ]))
 ]

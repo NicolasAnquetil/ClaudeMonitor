@@ -79,6 +79,19 @@ CMActivity >> children [
 	^ children ifNil: [ children := OrderedCollection new ]
 ]
 
+{ #category : 'testing' }
+CMActivity >> contentMatches: aString [
+	"Whether its tool, why, explanation, subject, text or response contains aString, ignoring case"
+
+	^ {
+		  toolName.
+		  why.
+		  explanation.
+		  self subject.
+		  self text.
+		  response } anySatisfy: [ :each | each isString and: [ each includesSubstring: aString caseSensitive: false ] ]
+]
+
 { #category : 'hierarchy' }
 CMActivity >> depth [
 
@@ -104,6 +117,15 @@ CMActivity >> explanation [
 CMActivity >> explanation: aString [
 
 	explanation := aString
+]
+
+{ #category : 'testing' }
+CMActivity >> filterKind [
+	"Its type for the filter of the monitor: a step of a plan counts as a tool call"
+
+	^ self isStep
+		  ifTrue: [ #tool ]
+		  ifFalse: [ kind ]
 ]
 
 { #category : 'accessing' }
