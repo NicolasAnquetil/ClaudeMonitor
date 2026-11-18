@@ -361,7 +361,8 @@ CMToploMonitorElement >> buildFilterBar [
 							   c vertical exact: 1 ];
 					   yourself).
 				  (CMStyle label: (CMStyle button: 'Containing:')).
-				  filterField };
+				  filterField.
+				  (self button: 'Clear filter' tooltip: 'Show every entry again: all types, no text' action: [ self clearFilter ]) };
 		  yourself
 ]
 
@@ -475,6 +476,17 @@ CMToploMonitorElement >> clear [
 	selected := nil.
 	detail text: '' asRopedText.
 	self reload
+]
+
+{ #category : 'filtering' }
+CMToploMonitorElement >> clearFilter [
+	"No filtering: every type shown, no text to look for"
+
+	filterText := ''.
+	shownKinds := self filterKinds asSet.
+	filterField text: '' asRopedText.
+	(self allChildrenBreadthFirstSelect: [ :each | each isKindOf: ToCheckbox ]) do: [ :each | each checked: true ].
+	self scheduleReload
 ]
 
 { #category : 'filtering' }
