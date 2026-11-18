@@ -341,11 +341,15 @@ CMToploMonitorElement >> buildHeader [
 
 { #category : 'initialization' }
 CMToploMonitorElement >> button: aString tooltip: aTooltip action: aBlock [
-	"A Toplo button with a label in our font size, not the theme's"
+	"A Toplo button with a label and a tooltip in our font size, not the theme's.
+	The tooltip text is built when shown, so it follows A-/A+"
 
 	^ ToButton new
 		  label: (ToLabel text: (CMStyle button: aString));
-		  tooltipString: aTooltip;
+		  tooltipBuilder: [ :win :request |
+				  win root addChild: ((ToLabel text: (CMStyle text: aTooltip size: CMStyle fontSize color: Color black))
+							   beMultiLine;
+							   yourself) ];
 		  clickAction: aBlock;
 		  yourself
 ]
