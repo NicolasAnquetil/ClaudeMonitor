@@ -28,7 +28,8 @@ Class {
 		'keepSelectionPending',
 		'filterText',
 		'shownKinds',
-		'filterField'
+		'filterField',
+		'tokensDetail'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -248,20 +249,14 @@ CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
 
 { #category : 'tokens' }
 CMToploMonitorElement >> addTokensDetailOf: anItem to: aText [
+	"For a window opened before the tokens had their own box: they follow the details"
 
-	| summary |
-	summary := (self isSession: anItem)
-		           ifTrue: [ (self callsOfSession: anItem) ifEmpty: [ nil ] ifNotEmpty: [ :calls | self summaryOfCalls: calls ] ]
-		           ifFalse: [
-				           anItem isStep
-					           ifTrue: [ nil ]
-					           ifFalse: [ self tokensDetailOf: anItem ] ].
-	summary ifNil: [ ^ self ].
-	self
-		section: 'Tokens'
-		text: summary
-		code: false
-		in: aText
+	(self tokensSummaryOf: anItem) ifNotNil: [ :summary |
+			self
+				section: 'Tokens'
+				text: summary
+				code: false
+				in: aText ]
 ]
 
 { #category : 'table' }
@@ -296,29 +291,35 @@ CMToploMonitorElement >> arrowBreadth [
 
 { #category : 'initialization' }
 CMToploMonitorElement >> buildBody [
-	"The list and the details side by side, with a divider that can be dragged"
+	"The list and the details side by side, with a divider that can be dragged.
+	The details of the selected row on top, its tokens in their own box below, with a divider too"
 
-	| pane |
+	| pane details |
 	table := self newTable.
 	table useScrollbar: true.
 	self applyArrowTokens.
 	table constraintsDo: [ :c | c linear weight: 0.6 ].
 	table addEventHandlerOn: BlElementExtentChangedEvent do: [ :event | self fitColumns ].
-	detail := ToAlbum new
-		          beReadonlyWithSelection;
-		          withSoftLine;
-		          yourself.
-	detail constraintsDo: [ :c |
+	detail := self newDetailAlbum.
+	detail constraintsDo: [ :c | c linear weight: 0.75 ].
+	tokensDetail := self newDetailAlbum.
+	tokensDetail constraintsDo: [ :c | c linear weight: 0.25 ].
+	details := ToPane vertical.
+	details constraintsDo: [ :c |
 			c horizontal matchParent.
 			c vertical matchParent.
 			c linear weight: 0.4 ].
+	details addChildren: {
+			detail.
+			tokensDetail }.
+	details addDividers.
 	pane := ToPane horizontal.
 	pane constraintsDo: [ :c |
 			c horizontal matchParent.
 			c vertical matchParent ].
 	pane addChildren: {
 			table.
-			detail }.
+			details }.
 	pane addDividers.
 	^ pane
 ]
@@ -475,6 +476,7 @@ CMToploMonitorElement >> clear [
 	clearedAt := DateAndTime now.
 	selected := nil.
 	detail text: '' asRopedText.
+	tokensDetail ifNotNil: [ tokensDetail text: '' asRopedText ].
 	self reload
 ]
 
@@ -874,6 +876,19 @@ CMToploMonitorElement >> matchesFilter: anActivity [
 		  self filterText isEmpty or: [ anActivity contentMatches: self filterText ] ]
 ]
 
+{ #category : 'initialization' }
+CMToploMonitorElement >> newDetailAlbum [
+	"A read-only text of the details pane, selectable, its lines wrapped"
+
+	^ ToAlbum new
+		  beReadonlyWithSelection;
+		  withSoftLine;
+		  constraintsDo: [ :c |
+				  c horizontal matchParent.
+				  c vertical matchParent ];
+		  yourself
+]
+
 { #category : 'detail' }
 CMToploMonitorElement >> newLineIn: aText [
 
@@ -1145,7 +1160,7 @@ CMToploMonitorElement >> showDetail: anItem [
 				(anItem isThought or: [ anItem isStep ])
 					ifTrue: [ self addTextDetailOf: anItem to: text ]
 					ifFalse: [ self addActivityDetailOf: anItem to: text ] ].
-	self addTokensDetailOf: anItem to: text.
+	tokensDetail ifNil: [ self addTokensDetailOf: anItem to: text ] ifNotNil: [ tokensDetail text: (self tokensTextOf: anItem) ].
 	detail text: text
 ]
 
@@ -1302,6 +1317,12 @@ CMToploMonitorElement >> tokensColumnWidth [
 	^ (CMStyle charWidth * 8) rounded + 8
 ]
 
+{ #category : 'accessing' }
+CMToploMonitorElement >> tokensDetail [
+
+	^ tokensDetail
+]
+
 { #category : 'tokens' }
 CMToploMonitorElement >> tokensDetailOf: anActivity [
 	"The tokens of the row, and of the model call it comes from"
@@ -1347,6 +1368,30 @@ CMToploMonitorElement >> tokensStringOf: anItem [
 	^ (((self isSession: anItem) not and: [ anItem isTokenEstimate ])
 		   ifTrue: [ '~' ]
 		   ifFalse: [ '' ]) , (self shortCount: tokens)
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensSummaryOf: anItem [
+	"What the row's tokens were, nil if none is known"
+
+	(self isSession: anItem) ifTrue: [
+		^ (self callsOfSession: anItem) ifEmpty: [ nil ] ifNotEmpty: [ :calls | self summaryOfCalls: calls ] ].
+	anItem isStep ifTrue: [ ^ nil ].
+	^ self tokensDetailOf: anItem
+]
+
+{ #category : 'tokens' }
+CMToploMonitorElement >> tokensTextOf: anItem [
+	"The text of the tokens box"
+
+	| text |
+	text := '' asRopedText.
+	text append: (CMStyle heading: 'Tokens').
+	self newLineIn: text.
+	text append: ((self tokensSummaryOf: anItem)
+			 ifNil: [ CMStyle small: 'No model call known for this row.' ]
+			 ifNotNil: [ :summary | CMStyle text: summary ]).
+	^ text
 ]
 
 { #category : 'updating' }
