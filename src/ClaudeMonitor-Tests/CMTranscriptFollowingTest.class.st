@@ -91,7 +91,8 @@ CMTranscriptFollowingTest >> setUp [
 	transcript := fileSystem / 'session.jsonl'.
 	transcript writeStreamDo: [ :stream |  ].
 	log := CMActivityLog new.
-	log fileSystem: fileSystem
+	log fileSystem: fileSystem.
+	log laterReadDelays: #(  )
 ]
 
 { #category : 'tests' }
@@ -270,6 +271,21 @@ CMTranscriptFollowingTest >> testPromptTotalsCountEachCallOnce [
 	self assert: prompt thinkingTokens equals: 100.
 	self assert: prompt inputTokens equals: 2 * (2 + 100 + 1000).
 	self deny: prompt isTokenEstimate
+]
+
+{ #category : 'tests' }
+CMTranscriptFollowingTest >> testTheLastMessageWrittenAfterStopIsRead [
+	"Claude Code may write the last message of an answer after it runs the Stop hook"
+
+	| prompt |
+	log laterReadDelays: #( 50 ).
+	self append: { (self userLine: 'p1') }.
+	prompt := log handleHookEvent: (self prompt: 'p1').
+	log handleHookEvent: (self event: 'Stop').
+	self append: { (self assistantLine: 'a1' type: 'text' text: 'Done.') }.
+	self assert: prompt children isEmpty.
+	(Delay forMilliseconds: 300) wait.
+	self assert: (prompt children collect: [ :each | each text ]) asArray equals: #( 'Done.' )
 ]
 
 { #category : 'tests' }

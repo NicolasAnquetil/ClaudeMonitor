@@ -24,7 +24,8 @@ Class {
 		'transcriptLock',
 		'calls',
 		'callsByKey',
-		'currentSession'
+		'currentSession',
+		'laterReadDelays'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -141,6 +142,16 @@ CMActivityLog >> fileSystem: aFileSystem [
 ]
 
 { #category : 'transcript' }
+CMActivityLog >> followTranscriptLaterOf: aDictionary [
+	"Read the transcript again after the delays of laterReadDelays, in the background"
+
+	[
+		self laterReadDelays do: [ :milliseconds |
+				(Delay forMilliseconds: milliseconds) wait.
+				self followTranscriptOf: aDictionary ] ] forkAt: Processor activePriority named: 'ClaudeMonitor transcript after Stop'
+]
+
+{ #category : 'transcript' }
 CMActivityLog >> followTranscriptOf: aDictionary [
 	"Add what Claude wrote in the session transcript since it was last read: messages, thinking"
 
@@ -170,7 +181,8 @@ CMActivityLog >> group: anActivity [
 CMActivityLog >> handleHookEvent: aDictionary [
 	"Create or complete the activity a Claude Code hook payload reports. What Claude wrote in the
 	transcript since the last event comes first, so that it lands before this event's activity.
-	Stop (end of an answer) only reads the transcript. Unknown events are ignored."
+	Stop (end of an answer) only reads the transcript, again a little later too: Claude Code may
+	write the last message after it runs the hook. Unknown events are ignored."
 
 	self rememberRawEvent: aDictionary.
 	self noteSessionOf: aDictionary.
@@ -179,7 +191,8 @@ CMActivityLog >> handleHookEvent: aDictionary [
 			event = 'PreToolUse' ifTrue: [ ^ self toolStarted: aDictionary ].
 			event = 'PostToolUse' ifTrue: [ ^ self tool: aDictionary finishedWith: #ok ].
 			event = 'PostToolUseFailure' ifTrue: [ ^ self tool: aDictionary finishedWith: #failed ].
-			event = 'UserPromptSubmit' ifTrue: [ ^ self promptSubmitted: aDictionary ] ].
+			event = 'UserPromptSubmit' ifTrue: [ ^ self promptSubmitted: aDictionary ].
+			event = 'Stop' ifTrue: [ self followTranscriptLaterOf: aDictionary ] ].
 	^ nil
 ]
 
@@ -200,6 +213,19 @@ CMActivityLog >> initialize [
 CMActivityLog >> lastPromptBySession [
 
 	^ lastPromptBySession ifNil: [ lastPromptBySession := Dictionary new ]
+]
+
+{ #category : 'transcript' }
+CMActivityLog >> laterReadDelays [
+	"Milliseconds to wait before each new read of the transcript after a Stop"
+
+	^ laterReadDelays ifNil: [ #( 500 1500 4000 ) ]
+]
+
+{ #category : 'accessing' }
+CMActivityLog >> laterReadDelays: anArray [
+
+	laterReadDelays := anArray
 ]
 
 { #category : 'transcript' }
@@ -446,9 +472,10 @@ CMActivityLog >> regroupToolCallsOf: aPrompt [
 
 { #category : 'private' }
 CMActivityLog >> rememberRawEvent: aDictionary [
+	"The last events received, each with the time it arrived, to look into what Claude Code sends"
 
 	mutex critical: [
-			rawEvents addLast: aDictionary.
+			rawEvents addLast: aDictionary -> DateAndTime now.
 			[ rawEvents size > self maxRawEvents ] whileTrue: [ rawEvents removeFirst ] ]
 ]
 
