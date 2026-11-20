@@ -29,7 +29,8 @@ Class {
 		'filterText',
 		'shownKinds',
 		'filterField',
-		'tokensDetail'
+		'tokensDetail',
+		'shownColumns'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -155,24 +156,14 @@ CMToploMonitorElement >> activityChanged: anActivity [
 { #category : 'detail' }
 CMToploMonitorElement >> addActivityDetailOf: anActivity to: aText [
 
-	| input main |
+	| input main inputString |
 	aText append: (CMStyle heading: (String streamContents: [ :s |
 					  s << anActivity shortToolName << '  -  ' << anActivity status asString.
 					  anActivity durationMilliseconds ifNotNil: [ :ms | s << '  -  ' << ms rounded printString << ' ms' ] ])).
 	self newLineIn: aText.
 	aText append: (CMStyle small: (self contextLineOf: anActivity)).
-	anActivity why ifNotNil: [ :why |
-			self
-				section: 'Why'
-				text: why
-				code: false
-				in: aText ].
-	anActivity explanation ifNotNil: [ :explanation |
-			self
-				section: 'Explanation'
-				text: explanation
-				code: false
-				in: aText ].
+	anActivity why ifNotNil: [ :why | self section: 'Why' markdown: why in: aText ].
+	anActivity explanation ifNotNil: [ :explanation | self section: 'Explanation' markdown: explanation in: aText ].
 	input := anActivity input ifNil: [ Dictionary new ].
 	main := anActivity isPrompt
 		        ifTrue: [ 'prompt' ]
@@ -180,18 +171,20 @@ CMToploMonitorElement >> addActivityDetailOf: anActivity to: aText [
 				        #( 'command' 'code' 'source' 'content' 'new_string' )
 					        detect: [ :key | (input at: key ifAbsent: [ nil ]) isString ]
 					        ifNone: [ nil ] ].
-	self
-		section: (anActivity isPrompt
-				 ifTrue: [ 'Prompt' ]
-				 ifFalse: [ 'Input' ])
-		text: (String streamContents: [ :s |
-					 main ifNotNil: [ s << (input at: main) asString ].
-					 input keys asSortedCollection do: [ :key |
-							 (key = main or: [ key = 'description' ]) ifFalse: [
-									 s isEmpty ifFalse: [ s cr ].
-									 s << key << ': ' << (self printValue: (input at: key)) ] ] ])
-		code: anActivity isPrompt not
-		in: aText.
+	inputString := String streamContents: [ :s |
+			               main ifNotNil: [ s << (input at: main) asString ].
+			               input keys asSortedCollection do: [ :key |
+					               (key = main or: [ key = 'description' ]) ifFalse: [
+							               s isEmpty ifFalse: [ s cr ].
+							               s << key << ': ' << (self printValue: (input at: key)) ] ] ].
+	anActivity isPrompt
+		ifTrue: [ self section: 'Prompt' markdown: inputString in: aText ]
+		ifFalse: [
+				self
+					section: 'Input'
+					text: inputString
+					code: true
+					in: aText ].
 	(anActivity response isNil or: [ anActivity response isEmpty ]) ifFalse: [
 			self
 				section: (anActivity isFailed
@@ -242,8 +235,7 @@ CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
 						 anActivity isThinking
 							 ifTrue: [ 'Thinking' ]
 							 ifFalse: [ 'Step' ] ])
-		text: anActivity text
-		code: false
+		markdown: anActivity text
 		in: aText
 ]
 
@@ -302,6 +294,7 @@ CMToploMonitorElement >> buildBody [
 	table addEventHandlerOn: BlElementExtentChangedEvent do: [ :event | self fitColumns ].
 	detail := self newDetailAlbum.
 	detail constraintsDo: [ :c | c linear weight: 0.75 ].
+	detail addEventHandlerOn: BlElementExtentChangedEvent do: [ :event | self detailResized ].
 	tokensDetail := self newDetailAlbum.
 	tokensDetail constraintsDo: [ :c | c linear weight: 0.25 ].
 	details := ToPane vertical.
@@ -529,6 +522,23 @@ CMToploMonitorElement >> detach [
 CMToploMonitorElement >> detail [
 
 	^ detail
+]
+
+{ #category : 'detail' }
+CMToploMonitorElement >> detailColumns [
+	"How many monospace characters fit in a line of the details pane, nil before it is laid out"
+
+	(detail isNil or: [ detail width < 1 ]) ifTrue: [ ^ nil ].
+	^ (detail width - 20 / CMStyle charWidth) floor max: 20
+]
+
+{ #category : 'detail' }
+CMToploMonitorElement >> detailResized [
+	"Tables in the details fit the pane: lay them out again when it gets wider or narrower"
+
+	self detailColumns = shownColumns ifTrue: [ ^ self ].
+	shownColumns := self detailColumns.
+	selected ifNotNil: [ self showDetail: selected ]
 ]
 
 { #category : 'current session' }
@@ -1041,6 +1051,17 @@ CMToploMonitorElement >> scheduleReload [
 			reloadPending := false.
 			self reload.
 			self keepSelection ]
+]
+
+{ #category : 'detail' }
+CMToploMonitorElement >> section: aTitle markdown: aString in: aText [
+	"aString is written by Claude or the user: show it formatted as Markdown"
+
+	self newLineIn: aText.
+	self newLineIn: aText.
+	aText append: (CMStyle heading: aTitle).
+	self newLineIn: aText.
+	aText append: (CMMarkdownComposer textFor: aString asString columns: self detailColumns)
 ]
 
 { #category : 'detail' }

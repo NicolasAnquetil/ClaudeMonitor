@@ -38,9 +38,19 @@ CMStyle class >> charWidth [
 { #category : 'styles' }
 CMStyle class >> code: aString [
 
-	^ (self text: aString size: self fontSize color: (Color r: 0.15 g: 0.15 b: 0.2))
-		  monospace;
-		  yourself
+	^ self monospace: (self text: aString size: self fontSize color: self codeColor)
+]
+
+{ #category : 'colors' }
+CMStyle class >> codeBackground [
+
+	^ Color r: 0.93 g: 0.93 b: 0.95
+]
+
+{ #category : 'colors' }
+CMStyle class >> codeColor [
+
+	^ Color r: 0.15 g: 0.15 b: 0.2
 ]
 
 { #category : 'colors' }
@@ -100,10 +110,30 @@ CMStyle class >> heading: aString [
 		  yourself
 ]
 
+{ #category : 'colors' }
+CMStyle class >> headingColor [
+
+	^ Color r: 0.2 g: 0.25 b: 0.45
+]
+
 { #category : 'styles' }
 CMStyle class >> label: aText [
 
 	^ BlTextElement new text: aText
+]
+
+{ #category : 'colors' }
+CMStyle class >> linkColor [
+
+	^ Color r: 0.1 g: 0.35 b: 0.75
+]
+
+{ #category : 'styles' }
+CMStyle class >> monospace: aText [
+	"BlText>>#monospace does nothing in this Bloc: name the font"
+
+	aText attribute: (BlFontFamilyAttribute named: 'Source Code Pro').
+	^ aText
 ]
 
 { #category : 'styles' }
