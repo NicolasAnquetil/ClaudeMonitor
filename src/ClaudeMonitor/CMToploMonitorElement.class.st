@@ -30,7 +30,9 @@ Class {
 		'shownKinds',
 		'filterField',
 		'tokensDetail',
-		'shownColumns'
+		'shownColumns',
+		'removeButton',
+		'pendingRemoval'
 	],
 	#category : 'ClaudeMonitor-UI',
 	#package : 'ClaudeMonitor',
@@ -62,6 +64,28 @@ CMToploMonitorElement >> acceptName [
 	name ifEmpty: [ ^ self hideNameField ].
 	renamedSession ifNil: [ log startSessionNamed: name ] ifNotNil: [ :session | log rename: session to: name ].
 	self hideNameField
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> activitiesRemoved: anAnnouncement [
+	"Rows went away in the log, maybe from another window. If the selected row went, the row that
+	comes in its place is selected"
+
+	| index |
+	pendingRemoval := nil.
+	((anAnnouncement activities includes: selected) or: [
+		 anAnnouncement session isNotNil and: [ anAnnouncement session == selected ] ]) ifFalse: [
+			self reload.
+			self keepSelection.
+			^ self updateSelectionButtons ].
+	index := self selectedIndex.
+	selected := nil.
+	self reload.
+	table dataAccessor size = 0 ifTrue: [ index := 0 ].
+	index > 0
+		ifTrue: [ self selectIndex: (index min: table dataAccessor size) ]
+		ifFalse: [ self clearDetail ].
+	self updateSelectionButtons
 ]
 
 { #category : 'tree' }
@@ -216,7 +240,7 @@ CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 		in: aText.
 	self newLineIn: aText.
 	self newLineIn: aText.
-	aText append: (CMStyle small: 'Double-click the row to rename it; Current session makes new prompts go under it.')
+	aText append: (CMStyle small: 'Double-click the row to rename it; Current session makes new prompts go under it; Delete removes it with its entries.')
 ]
 
 { #category : 'detail' }
@@ -317,6 +341,20 @@ CMToploMonitorElement >> buildBody [
 	^ pane
 ]
 
+{ #category : 'context menu' }
+CMToploMonitorElement >> buildContextMenu: aMenu for: aRequest [
+	"Right-click: the row under the mouse becomes the selected row, the menu acts on it"
+
+	| item |
+	item := self itemUnder: aRequest sourceEvent.
+	item ifNotNil: [ self select: item ].
+	aMenu addItem: (self menuItem: (self removeLabelFor: item) enabled: item isNotNil action: [ log remove: item ]).
+	aMenu addItem: (self menuItem: 'Collapse' enabled: item isNotNil action: [ self collapse: item ]).
+	aMenu addSeparator.
+	aMenu addItem: (self menuItem: 'Clear' enabled: true action: [ self clear ]).
+	aMenu addItem: (self menuItem: 'New session' enabled: true action: [ self newSession ])
+]
+
 { #category : 'filtering' }
 CMToploMonitorElement >> buildFilterBar [
 	"Which types of entries to show, and a text they must contain. Escape empties the text"
@@ -367,6 +405,8 @@ CMToploMonitorElement >> buildHeader [
 	nameField := self newNameField.
 	currentButton := self button: 'Current session' tooltip: 'New prompts go under the selected session' action: [ self makeSelectedCurrent ].
 	currentButton enabled: false.
+	removeButton := self button: 'Remove' tooltip: 'Remove the selected row and everything under it (Delete key)' action: [ self removeSelected ].
+	removeButton enabled: false.
 	hideReadsButton := self button: 'Hide reads' tooltip: 'Hide the calls that only look at things' action: [ self toggleHideReads ].
 	^ BlElement new
 		  layout: (BlLinearLayout horizontal
@@ -392,6 +432,7 @@ CMToploMonitorElement >> buildHeader [
 				  nameField.
 				  (self button: 'New session' tooltip: 'List what comes from now on under a session you name' action: [ self newSession ]).
 				  currentButton.
+				  removeButton.
 				  (self button: 'A-' tooltip: 'Smaller font' action: [ self changeFontSizeBy: -1 ]).
 				  (self button: 'A+' tooltip: 'Larger font' action: [ self changeFontSizeBy: 1 ]).
 				  hideReadsButton.
@@ -468,9 +509,17 @@ CMToploMonitorElement >> clear [
 
 	clearedAt := DateAndTime now.
 	selected := nil.
+	pendingRemoval := nil.
+	self clearDetail.
+	self reload.
+	self updateSelectionButtons
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> clearDetail [
+
 	detail text: '' asRopedText.
-	tokensDetail ifNotNil: [ tokensDetail text: '' asRopedText ].
-	self reload
+	tokensDetail ifNotNil: [ tokensDetail text: '' asRopedText ]
 ]
 
 { #category : 'filtering' }
@@ -489,6 +538,18 @@ CMToploMonitorElement >> clearFilterText [
 
 	filterField text: '' asRopedText.
 	self filterTextChanged
+]
+
+{ #category : 'context menu' }
+CMToploMonitorElement >> collapse: anItem [
+	"Fold anItem and every row under it"
+
+	collapsed add: anItem.
+	(self isSession: anItem)
+		ifTrue: [ collapsed addAll: (log activities select: [ :each | each groupId = anItem id ]) ]
+		ifFalse: [ anItem withAllChildrenDo: [ :each | collapsed add: each ] ].
+	self reload.
+	self keepSelection
 ]
 
 { #category : 'updating' }
@@ -803,6 +864,17 @@ CMToploMonitorElement >> isSession: anItem [
 	^ anItem isKindOf: CMSession
 ]
 
+{ #category : 'context menu' }
+CMToploMonitorElement >> itemUnder: anEvent [
+	"The entry of the row anEvent happened on, nil outside the rows"
+
+	| element |
+	anEvent ifNil: [ ^ nil ].
+	element := anEvent target.
+	[ element notNil and: [ (element isKindOf: ToNodeContainer) not ] ] whileTrue: [ element := element parent ].
+	^ element ifNotNil: [ element holder dataItem ]
+]
+
 { #category : 'selection' }
 CMToploMonitorElement >> keepSelection [
 	"Toplo's selection is a row index: put it back on the row of the selected item, wherever it is now"
@@ -868,6 +940,7 @@ CMToploMonitorElement >> log: anActivityLog [
 		when: CMActivityChanged do: [ :ann | self inUIThread: [ self activityChanged: ann activity ] ] for: self;
 		when: CMSessionChanged do: [ :ann | self inUIThread: [ self sessionChanged: ann session ] ] for: self;
 		when: CMActivitiesRegrouped do: [ :ann | self scheduleReload ] for: self;
+		when: CMActivitiesRemoved do: [ :ann | self inUIThread: [ self activitiesRemoved: ann ] ] for: self;
 		when: CMSessionStarted do: [ :ann | self inUIThread: [ self sessionStarted: ann session ] ] for: self
 ]
 
@@ -884,6 +957,17 @@ CMToploMonitorElement >> matchesFilter: anActivity [
 
 	^ (self shownKinds includes: anActivity filterKind) and: [
 		  self filterText isEmpty or: [ anActivity contentMatches: self filterText ] ]
+]
+
+{ #category : 'context menu' }
+CMToploMonitorElement >> menuItem: aString enabled: aBoolean action: aBlock [
+	"A menu item in our font size"
+
+	^ ToMenuItem new
+		  label: (ToLabel text: (CMStyle button: aString));
+		  enabled: aBoolean;
+		  clickAction: aBlock;
+		  yourself
 ]
 
 { #category : 'initialization' }
@@ -975,6 +1059,7 @@ CMToploMonitorElement >> newTable [
 		addEventHandlerOn: ToListPrimarySelectionChangedEvent do: [ :event | self selectionChanged: event ];
 		addEventHandlerOn: BlMouseDownEvent do: [ :event | self rowPressed: event ];
 		addEventHandlerOn: BlDoubleClickEvent do: [ :event | self doubleClicked ];
+		contextMenuBuilder: [ :menu :request | self buildContextMenu: menu for: request ];
 		addEventHandlerOn: ToTreeDataItemWrapperExpandedEvent
 		do: [ :event | collapsed remove: event wrapper dataItem ifAbsent: [ nil ] ];
 		addEventHandlerOn: ToTreeDataItemWrapperCollapsedEvent do: [ :event | collapsed add: event wrapper dataItem ];
@@ -985,6 +1070,14 @@ CMToploMonitorElement >> newTable [
 		addShortcut: (BlShortcutWithAction new
 				 combination: BlKeyCombination builder arrowRight build;
 				 action: [ self goRight ];
+				 yourself);
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder delete build;
+				 action: [ self removeSelected ];
+				 yourself);
+		addShortcut: (BlShortcutWithAction new
+				 combination: BlKeyCombination builder backspace build;
+				 action: [ self removeSelected ];
 				 yourself);
 		addEventHandlerOn: ToInstallSkinEvent do: [ :event | self inUIThread: [ self installArrowKeys ] ].
 	^ newTable
@@ -1027,6 +1120,27 @@ CMToploMonitorElement >> reload [
 			(wrapper isExpanded not and: [ (collapsed includes: wrapper dataItem) not ]) ifTrue: [ wrapper expand ].
 			index := index + 1 ].
 	self updateTitle
+]
+
+{ #category : 'context menu' }
+CMToploMonitorElement >> removeLabelFor: anItem [
+	"A session says how many entries go with it: the menu removes it without asking"
+
+	(anItem notNil and: [ self isSession: anItem ]) ifFalse: [ ^ 'Remove' ].
+	^ 'Remove session and its ' , (log activities count: [ :each | each groupId = anItem id ]) printString , ' entries'
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> removeSelected [
+	"Remove the selected row and everything under it. A session holds many entries: the first press
+	asks to press again, which removes it"
+
+	selected ifNil: [ ^ self ].
+	((self isSession: selected) and: [ pendingRemoval ~~ selected ]) ifTrue: [
+			pendingRemoval := selected.
+			^ self showRemovalWarningFor: selected ].
+	pendingRemoval := nil.
+	log remove: selected
 ]
 
 { #category : 'selection' }
@@ -1078,12 +1192,14 @@ CMToploMonitorElement >> section: aTitle text: aString code: isCode in: aText [
 
 { #category : 'selection' }
 CMToploMonitorElement >> select: anItem [
-	"anItem becomes the selected row: its details are shown and Toplo's selection is set on its row"
+	"anItem becomes the selected row: its details are shown and Toplo's selection is set on its row.
+	Selecting another row cancels a removal waiting to be confirmed"
 
+	anItem == pendingRemoval ifFalse: [ pendingRemoval := nil ].
 	selected := anItem.
 	self keepSelection.
 	self showDetail: selected.
-	self updateCurrentButton
+	self updateSelectionButtons
 ]
 
 { #category : 'selection' }
@@ -1193,6 +1309,22 @@ CMToploMonitorElement >> showNameFieldFor: aSessionOrNil [
 	nameField text: (CMStyle text: (aSessionOrNil ifNil: [ '' ] ifNotNil: [ :s | s displayTitle ])).
 	nameField visibility: BlVisibility visible.
 	nameField requestFocus
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> showRemovalWarningFor: aSession [
+
+	| count text |
+	count := (log activities select: [ :each | each groupId = aSession id ]) size.
+	text := CMStyle heading: 'Remove the session "' , aSession displayTitle , '"?'.
+	self newLineIn: text.
+	text append: (CMStyle text:
+			 'It holds ' , count printString , ' entries. Press Delete or Remove again to remove them; select another row to keep them.').
+	log currentSession == aSession ifTrue: [
+			self newLineIn: text.
+			text append:
+				(CMStyle small: 'It is the current session: the most recent other session becomes current, or a new one is created.') ].
+	detail text: text
 ]
 
 { #category : 'selection' }
@@ -1435,6 +1567,21 @@ CMToploMonitorElement >> updateColumnTitles [
 CMToploMonitorElement >> updateCurrentButton [
 	currentButton ifNil: [ ^ self ].
 	currentButton enabled: (self canMakeCurrent: selected)
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> updateRemoveButton [
+
+	removeButton ifNil: [ ^ self ].
+	removeButton enabled: selected isNotNil
+]
+
+{ #category : 'removing' }
+CMToploMonitorElement >> updateSelectionButtons [
+	"The buttons that act on the selected row"
+
+	self updateCurrentButton.
+	self updateRemoveButton
 ]
 
 { #category : 'updating' }

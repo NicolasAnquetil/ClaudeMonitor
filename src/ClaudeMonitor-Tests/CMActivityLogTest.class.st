@@ -63,6 +63,17 @@ CMActivityLogTest >> setUp [
 	log := CMActivityLog new
 ]
 
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testANewPromptAfterARemovedOneIsShown [
+
+	| p2 t2 |
+	log remove: (log handleHookEvent: (self prompt: 'p1')).
+	p2 := log handleHookEvent: (self prompt: 'p2').
+	t2 := log handleHookEvent: (self pre: 't2').
+	self assert: t2 parent identicalTo: p2.
+	self assert: log size equals: 2
+]
+
 { #category : 'tests' }
 CMActivityLogTest >> testChangesAreAnnounced [
 
@@ -101,6 +112,25 @@ CMActivityLogTest >> testFailureMarksTheActivityFailed [
 	log handleHookEvent: failure.
 	self assert: (log activityWithId: 't1') isFailed.
 	self assert: (log activityWithId: 't1') response equals: 'command not found'
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testLateEventsOfARemovedPromptAreDropped [
+
+	| p1 t1 |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: ((self pre: 't1')
+			       at: 'prompt_id' put: 'p1';
+			       yourself).
+	log remove: p1.
+	self assert: (log handleHookEvent: ((self post: 't1')
+				  at: 'prompt_id' put: 'p1';
+				  yourself)) isNil.
+	self assert: (log handleHookEvent: ((self pre: 't2')
+				  at: 'prompt_id' put: 'p1';
+				  yourself)) isNil.
+	self assert: (log handleHookEvent: (self pre: 't3')) isNil.
+	self assert: log size equals: 0
 ]
 
 { #category : 'tests' }
@@ -152,6 +182,97 @@ CMActivityLogTest >> testPromptIsRecorded [
 	self assert: activity isPrompt.
 	self assert: activity summary equals: 'restart the client'.
 	self assert: activity shortToolName equals: 'prompt'
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovalIsAnnounced [
+
+	| p1 t1 announced |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: ((self pre: 't1')
+			       at: 'prompt_id' put: 'p1';
+			       yourself).
+	log announcer when: CMActivitiesRemoved do: [ :ann | announced := ann ] for: self.
+	log remove: p1.
+	self assert: announced activities asSet equals: {
+			p1.
+			t1 } asSet.
+	self assert: announced session isNil
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingAPromptRemovesWhatIsUnderIt [
+
+	| p1 t1 p2 |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: ((self pre: 't1')
+			       at: 'prompt_id' put: 'p1';
+			       yourself).
+	p2 := log handleHookEvent: (self prompt: 'p2').
+	log remove: p1.
+	self assert: log activities asArray equals: { p2 }.
+	self assert: (log activityWithId: t1 id) isNil.
+	self assert: p1 isRemoved.
+	self assert: t1 isRemoved
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingASessionLeavesACurrentSession [
+
+	log handleHookEvent: (self prompt: 'p1').
+	self assert: log currentSession isNil.
+	log remove: (log sessionWithId: 's1').
+	self assert: log currentSession isNotNil
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingASessionRemovesItsActivities [
+
+	| session other p2 |
+	log handleHookEvent: (self prompt: 'p1').
+	session := log sessionWithId: 's1'.
+	other := log startSessionNamed: 'Other'.
+	p2 := log handleHookEvent: (self prompt: 'p2').
+	log remove: session.
+	self assert: (log sessionWithId: 's1') isNil.
+	self assert: log activities asArray equals: { p2 }.
+	self assert: log currentSession identicalTo: other
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingAToolDetachesItFromItsPrompt [
+
+	| p1 t1 |
+	p1 := log handleHookEvent: (self prompt: 'p1').
+	t1 := log handleHookEvent: ((self pre: 't1')
+			       at: 'prompt_id' put: 'p1';
+			       yourself).
+	log remove: t1.
+	self assert: p1 children isEmpty.
+	self assert: log activities asArray equals: { p1 }
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingTheCurrentSessionMakesTheLatestCurrent [
+
+	| older newer |
+	older := log startSessionNamed: 'Older'.
+	older startedAt: DateAndTime now - 1 hour.
+	newer := log startSessionNamed: 'Newer'.
+	log makeCurrent: older.
+	log remove: older.
+	self assert: log currentSession identicalTo: newer
+]
+
+{ #category : 'tests - removing' }
+CMActivityLogTest >> testRemovingTheLastSessionStartsANewOne [
+
+	| only |
+	only := log startSessionNamed: 'Only'.
+	log remove: only.
+	self assert: log currentSession notNil.
+	self deny: log currentSession identicalTo: only.
+	self assert: (log sessions includes: log currentSession)
 ]
 
 { #category : 'tests' }

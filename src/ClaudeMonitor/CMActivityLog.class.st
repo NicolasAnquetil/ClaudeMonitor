@@ -25,7 +25,8 @@ Class {
 		'calls',
 		'callsByKey',
 		'currentSession',
-		'laterReadDelays'
+		'laterReadDelays',
+		'removedIds'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -47,8 +48,10 @@ CMActivityLog >> activityWithId: aString [
 
 { #category : 'private' }
 CMActivityLog >> add: anActivity [
-	self group: anActivity.
+	"What comes for a removed activity (under a removed prompt, a removed message...) is dropped"
 
+	(self isDropped: anActivity) ifTrue: [ ^ self ].
+	self group: anActivity.
 	mutex critical: [
 			activities add: anActivity.
 			byId at: anActivity id put: anActivity ].
@@ -117,6 +120,24 @@ CMActivityLog >> currentSession [
 	^ currentSession
 ]
 
+{ #category : 'removing' }
+CMActivityLog >> ensureCurrentSession [
+	"There is always a session new prompts go under: the most recent one, else a new one"
+
+	| latest |
+	currentSession ifNotNil: [ ^ currentSession ].
+	latest := self sessions values inject: nil into: [ :best :each |
+			          (best isNil or: [ (each startedAt ifNil: [ DateAndTime epoch ]) > (best startedAt ifNil: [ DateAndTime epoch ]) ])
+				          ifTrue: [ each ]
+				          ifFalse: [ best ] ].
+	latest ifNil: [
+			^ self startSessionNamed: 'Session ' , (CMSession new
+					   startedAt: DateAndTime now;
+					   dateString) ].
+	self makeCurrent: latest.
+	^ latest
+]
+
 { #category : 'private' }
 CMActivityLog >> explanationFor: aDictionary [
 	"What Claude wrote before this call; nil when the transcript cannot be read"
@@ -170,6 +191,22 @@ CMActivityLog >> followTranscriptOf: aDictionary [
 			result first do: [ :entry | self noteTranscriptEntry: entry inSession: sessionId ] ]
 ]
 
+{ #category : 'removing' }
+CMActivityLog >> forget: someActivities [
+	"Take someActivities and everything under them out of the log; their ids are remembered so that
+	what comes for them later is dropped. Called under the mutex. Answer all the activities taken out"
+
+	| all |
+	all := IdentitySet new.
+	someActivities do: [ :each | each withAllChildrenDo: [ :activity | all add: activity ] ].
+	all do: [ :each |
+			each beRemoved.
+			self removedIds add: each id.
+			byId removeKey: each id ifAbsent: [ nil ] ].
+	activities removeAll: (activities select: [ :each | all includes: each ]).
+	^ all asArray
+]
+
 { #category : 'current session' }
 CMActivityLog >> group: anActivity [
 	"An activity with no parent goes under the current session, if any"
@@ -207,6 +244,21 @@ CMActivityLog >> initialize [
 	mutex := Mutex new.
 	rawEvents := OrderedCollection new.
 	transcriptReader := CMTranscriptReader new
+]
+
+{ #category : 'removing' }
+CMActivityLog >> isDropped: anActivity [
+	"Whether anActivity belongs to something the user removed"
+
+	(self isRemoved: anActivity id) ifTrue: [ ^ true ].
+	anActivity ancestorsDo: [ :each | each isRemoved ifTrue: [ ^ true ] ].
+	^ false
+]
+
+{ #category : 'removing' }
+CMActivityLog >> isRemoved: anId [
+
+	^ mutex critical: [ self removedIds includes: anId ]
 ]
 
 { #category : 'hierarchy' }
@@ -479,6 +531,50 @@ CMActivityLog >> rememberRawEvent: aDictionary [
 			[ rawEvents size > self maxRawEvents ] whileTrue: [ rawEvents removeFirst ] ]
 ]
 
+{ #category : 'removing' }
+CMActivityLog >> remove: anItem [
+	"The user removes a row: a session or an activity, with everything under it"
+
+	(anItem isKindOf: CMSession)
+		ifTrue: [ self removeSession: anItem ]
+		ifFalse: [ self removeActivity: anItem ]
+]
+
+{ #category : 'removing' }
+CMActivityLog >> removeActivity: anActivity [
+
+	| removedOnes |
+	removedOnes := mutex critical: [
+			               anActivity parent ifNotNil: [ :parent | parent children remove: anActivity ifAbsent: [ nil ] ].
+			               self forget: { anActivity } ].
+	announcer announce: (CMActivitiesRemoved new
+			 activities: removedOnes;
+			 yourself)
+]
+
+{ #category : 'removing' }
+CMActivityLog >> removeSession: aSession [
+	"Its activities go with it. Its transcript is not read again from the start: if Claude Code goes on
+	in this session, its row comes back with only what is new. A current session is always left"
+
+	| removedOnes |
+	removedOnes := mutex critical: [
+			               sessions removeKey: aSession id ifAbsent: [ nil ].
+			               currentSession == aSession ifTrue: [ currentSession := nil ].
+			               self forget: (activities select: [ :each | each groupId = aSession id ]) ].
+	self ensureCurrentSession.
+	announcer announce: (CMActivitiesRemoved new
+			 activities: removedOnes;
+			 session: aSession;
+			 yourself)
+]
+
+{ #category : 'removing' }
+CMActivityLog >> removedIds [
+
+	^ removedIds ifNil: [ removedIds := Set new ]
+]
+
 { #category : 'current session' }
 CMActivityLog >> rename: aSession to: aString [
 	"The title given by the user is kept: it is not read again from the transcript"
@@ -613,9 +709,12 @@ CMActivityLog >> tokensChangedIn: aCall [
 
 { #category : 'hook events' }
 CMActivityLog >> tool: aDictionary finishedWith: aStatus [
+	"A tool call the user removed is not shown again"
 
 	| activity |
+	(self isRemoved: (self toolUseIdIn: aDictionary)) ifTrue: [ ^ nil ].
 	activity := (self activityWithId: (self toolUseIdIn: aDictionary)) ifNil: [ self toolStarted: aDictionary ].
+	activity ifNil: [ ^ nil ].
 	activity
 		status: aStatus;
 		finishedAt: DateAndTime now;
@@ -631,10 +730,14 @@ CMActivityLog >> tool: aDictionary finishedWith: aStatus [
 CMActivityLog >> toolStarted: aDictionary [
 	"Hook requests are handled concurrently: a PostToolUse may have been handled first,
 	or be handled at the same time. Finding or creating the activity is one step under the lock,
-	so there is only ever one activity per tool use; PreToolUse then completes it"
+	so there is only ever one activity per tool use; PreToolUse then completes it.
+	A tool call under something the user removed is dropped"
 
-	| id input activity isNew |
+	| id input activity isNew owner |
 	id := self toolUseIdIn: aDictionary.
+	(self isRemoved: id) ifTrue: [ ^ nil ].
+	owner := self ownerOfToolFor: aDictionary.
+	(owner notNil and: [ owner isRemoved or: [ self isDropped: owner ] ]) ifTrue: [ ^ nil ].
 	input := aDictionary at: 'tool_input' ifAbsent: [ Dictionary new ].
 	input isDictionary ifFalse: [ input := Dictionary new ].
 	isNew := false.
@@ -648,15 +751,14 @@ CMActivityLog >> toolStarted: aDictionary [
 						                       status: #running;
 						                       startedAt: DateAndTime now;
 						                       promptId: (aDictionary at: 'prompt_id' ifAbsent: [ nil ]);
-						                       parent: (self ownerOfToolFor: aDictionary);
+						                       parent: owner;
 						                       yourself.
 					            self group: created.
 					            activities add: created.
 					            byId at: id put: created.
 					            created ] ].
 	isNew ifTrue: [
-		self transcriptLock critical: [
-			(self callsByKey at: id ifAbsent: [ nil ]) ifNotNil: [ :c | c show: id by: activity ] ] ].
+		self transcriptLock critical: [ (self callsByKey at: id ifAbsent: [ nil ]) ifNotNil: [ :c | c show: id by: activity ] ] ].
 	activity
 		sessionId: (aDictionary at: 'session_id' ifAbsent: [ nil ]);
 		toolName: (aDictionary at: 'tool_name' ifAbsent: [ '?' ]);

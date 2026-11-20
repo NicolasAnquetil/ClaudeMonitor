@@ -29,7 +29,8 @@ Class {
 		'parent',
 		'children',
 		'call',
-		'groupId'
+		'groupId',
+		'removed'
 	],
 	#category : 'ClaudeMonitor-Model',
 	#package : 'ClaudeMonitor',
@@ -48,6 +49,12 @@ CMActivity >> ancestorsDo: aBlock [
 	parent ifNotNil: [
 			aBlock value: parent.
 			parent ancestorsDo: aBlock ]
+]
+
+{ #category : 'removing' }
+CMActivity >> beRemoved [
+
+	removed := true
 ]
 
 { #category : 'tokens' }
@@ -223,6 +230,13 @@ CMActivity >> isPharoTool [
 CMActivity >> isPrompt [
 
 	^ kind = #prompt
+]
+
+{ #category : 'removing' }
+CMActivity >> isRemoved [
+	"Removed from its log by the user: what comes for it later is dropped"
+
+	^ removed == true
 ]
 
 { #category : 'testing' }

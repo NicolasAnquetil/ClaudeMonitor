@@ -115,6 +115,23 @@ CMTranscriptFollowingTest >> testAMessageReadLateTakesTheToolCallsAfterIt [
 	self assert: message children asArray equals: { late }
 ]
 
+{ #category : 'tests' }
+CMTranscriptFollowingTest >> testARemovedSessionDoesNotComeBackWithItsOldEntries [
+
+	| prompt |
+	self append: { (self userLine: 'p1') }.
+	log handleHookEvent: (self prompt: 'p1').
+	self append: { (self assistantLine: 'a1' type: 'text' text: 'Old.') }.
+	log handleHookEvent: (self event: 'Stop').
+	log remove: (log sessionWithId: 's1').
+	self append: { (self userLine: 'p2') }.
+	prompt := log handleHookEvent: (self prompt: 'p2').
+	self append: { (self assistantLine: 'a2' type: 'text' text: 'New.') }.
+	log handleHookEvent: (self event: 'Stop').
+	self assert: (log activities select: [ :each | each isMessage ] thenCollect: [ :each | each text ]) asArray equals: #( 'New.' ).
+	self assert: (prompt children collect: [ :each | each text ]) asArray equals: #( 'New.' )
+]
+
 { #category : 'tests - tokens' }
 CMTranscriptFollowingTest >> testASingleBlockCallIsExact [
 
