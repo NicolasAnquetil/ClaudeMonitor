@@ -332,7 +332,7 @@ CMToploMonitorElement >> buildBody [
 	details addChildren: {
 			detail.
 			tokensDetail }.
-	details addDividers.
+	details addDividers do: [ :each | self styleDivider: each ].
 	pane := ToPane horizontal.
 	pane constraintsDo: [ :c |
 			c horizontal matchParent.
@@ -340,7 +340,7 @@ CMToploMonitorElement >> buildBody [
 	pane addChildren: {
 			table.
 			details }.
-	pane addDividers.
+	pane addDividers do: [ :each | self styleDivider: each ].
 	^ pane
 ]
 
@@ -1389,6 +1389,13 @@ CMToploMonitorElement >> statusIconFor: anActivity [
 	icon innerImageColor: color.
 	icon extent: (CMStyle fontSize * 1.1) rounded asPoint.
 	^ icon
+]
+
+{ #category : 'initialization' }
+CMToploMonitorElement >> styleDivider: aDivider [
+	"Wide enough to grab with the mouse; Toplo highlights it, with a resize cursor, under the mouse"
+
+	aDivider thickness: 10
 ]
 
 { #category : 'tokens' }
