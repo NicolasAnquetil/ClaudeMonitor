@@ -227,6 +227,13 @@ CMActivity >> isPharoTool [
 ]
 
 { #category : 'testing' }
+CMActivity >> isPlan [
+	"The whole plan of plan mode, as one step"
+
+	^ self isStep and: [ (self input at: 'plan' ifAbsent: [ false ]) == true ]
+]
+
+{ #category : 'testing' }
 CMActivity >> isPrompt [
 
 	^ kind = #prompt
@@ -415,6 +422,7 @@ CMActivity >> shortToolName [
 	self isPrompt ifTrue: [ ^ 'prompt' ].
 	self isMessage ifTrue: [ ^ 'message' ].
 	self isThinking ifTrue: [ ^ 'thinking' ].
+	self isPlan ifTrue: [ ^ 'plan' ].
 	self isStep ifTrue: [ ^ 'step' ].
 	toolName ifNil: [ ^ '?' ].
 	(toolName beginsWith: 'mcp__') ifFalse: [ ^ toolName ].
@@ -457,6 +465,7 @@ CMActivity >> subject [
 	"The main argument of the call: the command, the file, the method, the code or the prompt"
 
 	| in |
+	self isPlan ifTrue: [ ^ (self input at: 'title' ifAbsent: [ '' ]) asString ].
 	(self isThought or: [ self isStep ]) ifTrue: [ ^ self text ].
 	in := self input.
 	self isPrompt ifTrue: [ ^ (in at: 'prompt' ifAbsent: [ '' ]) asString ].

@@ -245,7 +245,7 @@ CMToploMonitorElement >> addSessionDetailOf: aSession to: aText [
 
 { #category : 'detail' }
 CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
-	"A message, a thinking or a step: its text, whole"
+	"A message, a thinking, a step or a plan: its text, whole"
 
 	aText append: (CMStyle heading: (String streamContents: [ :s |
 					  s << anActivity shortToolName.
@@ -258,7 +258,10 @@ CMToploMonitorElement >> addTextDetailOf: anActivity to: aText [
 				 ifFalse: [
 						 anActivity isThinking
 							 ifTrue: [ 'Thinking' ]
-							 ifFalse: [ 'Step' ] ])
+							 ifFalse: [
+									 anActivity isPlan
+										 ifTrue: [ 'Plan' ]
+										 ifFalse: [ 'Step' ] ] ])
 		markdown: anActivity text
 		in: aText
 ]

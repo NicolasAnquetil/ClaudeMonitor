@@ -306,9 +306,9 @@ CMTranscriptFollowingTest >> testTheLastMessageWrittenAfterStopIsRead [
 ]
 
 { #category : 'tests' }
-CMTranscriptFollowingTest >> testThePlanOfPlanModeHasOneStepPerItem [
+CMTranscriptFollowingTest >> testThePlanOfPlanModeIsOneEntry [
 
-	| plan tool |
+	| plan tool step |
 	plan := '# Plan
 
 Some context.
@@ -317,9 +317,12 @@ Some context.
 2. Show the entries
 - Test it'.
 	tool := log handleHookEvent: (self pre: 't1' tool: 'ExitPlanMode' input: (Dictionary with: 'plan' -> plan)).
-	self
-		assert: (tool children collect: [ :each | each text ]) asArray
-		equals: #( 'Plan' 'Read the transcript' 'Show the entries' 'Test it' )
+	self assert: tool children size equals: 1.
+	step := tool children first.
+	self assert: step isPlan.
+	self assert: step text equals: plan.
+	self assert: step subject equals: 'Plan'.
+	self assert: step shortToolName equals: 'plan'
 ]
 
 { #category : 'tests' }

@@ -422,8 +422,9 @@ CMActivityLog >> planItemIn: aLine [
 
 { #category : 'hook events' }
 CMActivityLog >> planStepsIn: anInput [
-	"The steps of a TodoWrite to-do list ('todos') or of a plan-mode plan ('plan', in Markdown:
-	its headings and list items), each as a Dictionary with 'text' (and 'state' for a to-do)"
+	"The steps of a TodoWrite to-do list ('todos'), each as a Dictionary with 'text' and 'state'.
+	A plan-mode plan ('plan', in Markdown) is one step, whole: its 'text', its 'title' (first heading
+	or list item) and 'plan' set to true"
 
 	anInput at: 'todos' ifPresent: [ :todos |
 			todos isArray ifTrue: [
@@ -433,10 +434,24 @@ CMActivityLog >> planStepsIn: anInput [
 								  at: 'state' put: (each at: 'status' ifAbsent: [ 'pending' ]);
 								  yourself ] ] ].
 	anInput at: 'plan' ifPresent: [ :plan |
-			plan isString ifTrue: [
-					^ (plan lines collect: [ :line | self planItemIn: line ] thenSelect: [ :text | text notEmpty ]) collect: [ :text |
-						  Dictionary with: 'text' -> text ] ] ].
+			(plan isString and: [ plan trimBoth notEmpty ]) ifTrue: [
+					^ { (Dictionary new
+						   at: 'text' put: plan;
+						   at: 'title' put: (self planTitleIn: plan);
+						   at: 'plan' put: true;
+						   yourself) } ] ].
 	^ #(  )
+]
+
+{ #category : 'hook events' }
+CMActivityLog >> planTitleIn: aPlan [
+	"Its first heading or list item, else its first line"
+
+	| lines |
+	lines := aPlan lines reject: [ :each | each trimBoth isEmpty ].
+	lines isEmpty ifTrue: [ ^ '' ].
+	lines do: [ :each | (self planItemIn: each) ifNotEmpty: [ :item | ^ item ] ].
+	^ lines first trimBoth
 ]
 
 { #category : 'hook events' }
